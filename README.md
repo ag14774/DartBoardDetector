@@ -9,8 +9,8 @@ There is an introductory part which helps you to understand how the Viola-Jones 
 ##Second
 You will build your own object detector by training the Viola-Jones framework on a customized object class, that is `dartboards’. You will then test the detector’s performance and interpret your results on an image set.
 
-#Third
+##Third
 You will combine your detector with a Hough transform for component configurations of the dartboard shape in order to improve detections. A Hough transform (e.g. for concentric lines, circles, ellipses) should be used, combined and evaluated together with the Viola Jones detector.
 
-#Fourth
+##Fourth
 In order to be able to reach marks above the first class boundary, we ask you to research, understand and use in OpenCV one other appropriate vision approach to further improve the detection efficacy and/or efficiency.
