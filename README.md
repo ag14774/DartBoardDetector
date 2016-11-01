@@ -1,12 +1,12 @@
-##Task Overview: Detecting Dart Boards
+#Task Overview: Detecting Dart Boards
 
-#Introduction
+##Introduction
 Being able to detect and locate instances of an object class in images is important for many computer vision applicationsas well as an ongoing area of research. This assignment requires you 1) to experiment with the Viola-Jones object detection framework as discussed in the lectures and provided by OpenCV, and 2) combine it with other detection approaches to improve its efficacy. Your approach is to be tested and evaluated on a small image set that depicts aspects of a popular sport and past time – darts.
 
-#First
+##First
 There is an introductory part which helps you to understand how the Viola-Jones detector can be used in OpenCV and lets you experience how it operates in practice. In particular, you will experiment with an off-the-shelf face detector.
 
-#Second
+##Second
 You will build your own object detector by training the Viola-Jones framework on a customized object class, that is `dartboards’. You will then test the detector’s performance and interpret your results on an image set.
 
 #Third
