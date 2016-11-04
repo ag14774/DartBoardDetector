@@ -1,6 +1,6 @@
 /////////////////////////////////////////////////////////////////////////////
 //
-// COMS30121 - face.cpp
+// COMS30121 - darts.cpp
 //
 /////////////////////////////////////////////////////////////////////////////
 
@@ -23,15 +23,17 @@ using namespace cv;
 void detectAndDisplay( Mat frame );
 
 /** Global variables */
-String cascade_name = "cascade.xml";
+//String cascade_name = "cascade.xml";
+String cascade_name = "frontalface.xml";
 CascadeClassifier cascade;
-
 
 /** @function main */
 int main( int argc, const char** argv )
 {
        // 1. Read Input Image
 	Mat frame = imread(argv[1], CV_LOAD_IMAGE_COLOR);
+	//string fullname(argv[1]);
+	//string noext = fullname.substr(0, fullname.find_last_of("."));
 
 	// 2. Load the Strong Classifier in a structure called `Cascade'
 	if( !cascade.load( cascade_name ) ){ printf("--(!)Error loading\n"); return -1; };
@@ -40,6 +42,7 @@ int main( int argc, const char** argv )
 	detectAndDisplay( frame );
 
 	// 4. Save Result Image
+	//imwrite( noext+"_detected.jpg", frame );
 	imwrite( "detected.jpg", frame );
 
 	return 0;
@@ -48,18 +51,18 @@ int main( int argc, const char** argv )
 /** @function detectAndDisplay */
 void detectAndDisplay( Mat frame )
 {
-	std::vector<Rect> faces;
+	vector<Rect> faces;
 	Mat frame_gray;
 
 	// 1. Prepare Image by turning it into Grayscale and normalising lighting
 	cvtColor( frame, frame_gray, CV_BGR2GRAY );
 	equalizeHist( frame_gray, frame_gray );
 
-	// 2. Perform Viola-Jones Object Detection 
+	// 2. Perform Viola-Jones Object Detection
 	cascade.detectMultiScale( frame_gray, faces, 1.1, 1, 0|CV_HAAR_SCALE_IMAGE, Size(50, 50), Size(500,500) );
 
        // 3. Print number of Faces found
-	std::cout << faces.size() << std::endl;
+	cout << faces.size() << endl;
 
        // 4. Draw box around faces found
 	for( int i = 0; i < faces.size(); i++ )
