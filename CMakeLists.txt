@@ -1,5 +1,5 @@
 ﻿cmake_minimum_required(VERSION 2.8)
 project( DartBoardDetector )
 find_package( OpenCV REQUIRED )
-add_executable( darts.out darts.cpp )
-target_link_libraries( darts.out ${OpenCV_LIBS} )
+add_executable( opencv_createsamples.out opencv_createsamples.cpp )
+target_link_libraries( opencv_createsamples.out ${OpenCV_LIBS} )
