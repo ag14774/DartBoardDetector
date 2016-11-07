@@ -42,3 +42,27 @@ http://docs.opencv.org/3.1.0/d3/dc1/tutorial_basic_linear_transform.html
 ##Convolutions
 Use filter2D function. filter2D just does correlation, so invert kernel first.
 http://docs.opencv.org/3.1.0/d7/d37/tutorial_mat_mask_operations.html
+
+F1 scores - darts = 2TP/(2TP+FN+FP)
+            (TP) (FN)
+dart0:  1/7  (1) (0)
+dart1:  2/11 (1) (0)
+dart2:  1/3  (2) (0)
+dart3:  2/13 (1) (0)
+dart4:  1/6  (1) (0)
+dart5:  2/19 (1) (0)
+dart6:  2/15 (1) (0)
+dart7:  2/29 (1) (0)
+dart8:  4/23 (2) (0)
+dart9:  4/11 (2) (0)
+dart10: 6/35 (3) (1)
+dart11: 2/5  (2) (1)
+dart12: 2/5  (1) (0)
+dart13: 1/8  (1) (0)
+dart14: 4/39 (2) (0)
+dart15: 2/9  (1) (0)
+
+-Initially with high sensitivity threshold. High TPR but also high FPR
+-Each stage adds more features which discards FPs without decreasing TPs.
+-This is like a constraint optimization problem, where a larger set of objects is initially detected, and we optimize by removing false positives.
+-In each stage FPR decreases rapidly, hence extra stages could be helpful.
