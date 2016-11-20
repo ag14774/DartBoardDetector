@@ -45,7 +45,7 @@ void drawRects(Mat& frame, Mat& output, vector<Rect> v);
                                                                            //inverse of resolution in X, Y and R direction
 void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radius, int max_radius,
 											int threshold, int resX, int resY, int resR, vector<ConcentricCircles>& output);
-void extractEdges(Mat& gray_input, vector<EdgePointInfo>& edgeList, int edge_thresh);
+void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int edge_thresh);
 double rectIntersection(Rect A, Rect B);
 double fscore(vector<Rect> ground, vector<Rect> detected);
 
@@ -104,6 +104,7 @@ int main( int argc, const char** argv )
 void detect( Mat& frame, vector<Rect>& output )
 {
 	Mat frame_gray;
+	Mat frame_gray_norm;
 	//Mat grad_x, grad_y;
 	//Mat abs_grad_x, abs_grad_y;
 	//Mat grad;
@@ -112,13 +113,21 @@ void detect( Mat& frame, vector<Rect>& output )
 	// 1. Prepare Image by turning it into Grayscale
 	cvtColor( frame, frame_gray, CV_BGR2GRAY );
 
+	//Normalise lighting
+  equalizeHist( frame_gray, frame_gray_norm );
+
+	// 2. Perform Viola-Jones Object Detection
+	cascade.detectMultiScale( frame_gray_norm, output, 1.1, 1, 0|CV_HAAR_SCALE_IMAGE, Size(50, 50), Size(500,500) );
+
+  // 3. Print number of dartboards found
+	cout << output.size() << endl;
 
 //***************TESTING*********************
   vector<EdgePointInfo> edges;
-	extractEdges(frame_gray, edges, 25);
+	extractEdges(frame_gray, output, edges, 20);
 	cout<<edges.size()<<endl;
 	vector<ConcentricCircles> circs;
-	int min_radius=15,max_radius=250,thres=350,resX=5,resY=5,resR=5;
+	int min_radius=15,max_radius=150,thres=300,resX=6,resY=6,resR=7;
 	detectConcentric(edges, frame_gray.size(), min_radius, max_radius, thres, resX, resY, resR, circs);
 	cout<<circs.size()<<endl;
 	for(vector<ConcentricCircles>::iterator it = circs.begin();it!=circs.end();++it){
@@ -130,14 +139,7 @@ void detect( Mat& frame, vector<Rect>& output )
 	}
 //*******************************************
 
-  //Normalise lighting
-  equalizeHist( frame_gray, frame_gray );
 
-	// 2. Perform Viola-Jones Object Detection
-	cascade.detectMultiScale( frame_gray, output, 1.1, 1, 0|CV_HAAR_SCALE_IMAGE, Size(50, 50), Size(500,500) );
-
-  // 3. Print number of dartboards found
-	cout << output.size() << endl;
 
 }
 
@@ -213,7 +215,7 @@ void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radiu
 	int vote_around_radius = 0; //measured in bins
 	int SHIFT = 10; int ONE = 1<<SHIFT;
   int ndims = 3;
-	double low_threshold = threshold * 0.2;
+	double low_threshold = threshold * 0.4;
 	int sizes[3] = { imsize.height/resY, imsize.width/resX, (max_radius-min_radius)/resR };
 
 	Mat accum;
@@ -318,7 +320,7 @@ void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radiu
 	//waitKey(0);
 }
 
-void extractEdges(Mat& gray_input, vector<EdgePointInfo>& edgeList, int edge_thresh)
+void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int edge_thresh)
 {
   float magScale = 255.f/1442.f;
 	int scale = 1;
@@ -356,13 +358,23 @@ void extractEdges(Mat& gray_input, vector<EdgePointInfo>& edgeList, int edge_thr
 			grad_ptr[j] = (uchar)255*(psi-(-pi))/(2*pi);
 			#if EDGEDETECT==0
 			double mag = magScale*sqrt(dx_ptr[j]*dx_ptr[j]+dy_ptr[j]*dy_ptr[j]);
+			Point epiPoint(j,i);
 			if(mag > edge_thresh){
-				thres_ptr[j] = 255;
-				EdgePointInfo epi;
-				epi.x = j;
-				epi.y = i;
-				epi.grad = psi;
-				edgeList.push_back(epi);
+				bool contained = false;
+				for(vector<Rect>::iterator it = v.begin(); it!= v.end(); ++it){
+					if((*it).contains(epiPoint)){
+						contained = true;
+						break;
+					}
+				}
+				if(contained){
+					thres_ptr[j] = 255;
+					EdgePointInfo epi;
+					epi.x = j;
+					epi.y = i;
+					epi.grad = psi;
+	 				edgeList.push_back(epi);
+				}
 			}
 			else{
 				thres_ptr[j] = 0;
@@ -373,7 +385,16 @@ void extractEdges(Mat& gray_input, vector<EdgePointInfo>& edgeList, int edge_thr
 				epi.x = j;
 				epi.y = i;
 				epi.grad = psi;
-				edgeList.push_back(epi);
+				Point epiPoint(epi.x,epi.y);
+				vector<Rect>::iterator it;
+				for(it = v.begin(); it!= v.end(); ++it){
+					if((*it).contains(epiPoint)){
+						edgeList.push_back(epi);
+						break;
+					}
+				}
+				if(it==v.end())
+					thres_ptr[j] = 0;
 			}
 			#endif
 		}
