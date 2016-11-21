@@ -18,6 +18,7 @@
 #include "darts_gt.h"
 
 #define MAX_CONCENTRIC 20
+#define MAX_DARTBOARDS 20
 #define EDGEDETECT 1 //1 for CannyEdge
 
 using namespace std;
@@ -48,6 +49,7 @@ void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radiu
 void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int edge_thresh);
 double rectIntersection(Rect A, Rect B);
 double fscore(vector<Rect> ground, vector<Rect> detected);
+int findCluster(int num_clusters, float clusters[][3], int thresh, Rect& rect);
 
 /** Global variables */
 CascadeClassifier cascade;
@@ -139,8 +141,100 @@ void detect( Mat& frame, vector<Rect>& output )
 	}
 //*******************************************
 
+  int distance_thr = 50;
+	int dart_mask[output.size()] = {0};
+	for(unsigned int i = 0; i<output.size();++i){
+		for(vector<ConcentricCircles>::iterator cir=circs.begin();cir!=circs.end();++cir){
+			Point rectC( output[i].x+output[i].width/2, output[i].y+output[i].height/2 );
+			Point cirC( (*cir).xc, (*cir).yc );
+			double dist = norm(rectC-cirC);
+			int minDim = min(output[i].width, output[i].height);
+			if(dist<distance_thr){
+				dart_mask[i] = 1;
+				break;
+			}
 
+		}
+	}
 
+	for(int i=0;i<output.size();i++)
+	  cout<<dart_mask[i]<<" ";
+	cout<<endl;
+  //detect clusters
+  int num_clusters = 0;
+	float clusters[MAX_DARTBOARDS][3] = {0}; //(x,y,num)
+	float rectangles[MAX_DARTBOARDS][4] = {0}; //(x0,y0,x1,y1)
+	int i = 0;
+	vector<Rect>::iterator it=output.begin();
+	while(it!=output.end()){
+  	if(dart_mask[i]>0){
+			int clust = findCluster(num_clusters, clusters, 200, *it);
+			//cout<<"test"<<endl;
+			if(clust<0){
+				clust = num_clusters++;
+			}
+			int sumX = clusters[clust][0] * clusters[clust][2] + (*it).x+(*it).width/2;
+			int sumY = clusters[clust][1] * clusters[clust][2] + (*it).y+(*it).height/2;
+
+			int sumX0 = rectangles[clust][0] * clusters[clust][2] + (*it).tl().x;
+			int sumY0 = rectangles[clust][1] * clusters[clust][2] + (*it).tl().y;
+			int sumX1 = rectangles[clust][2] * clusters[clust][2] + (*it).br().x;
+			int sumY1 = rectangles[clust][3] * clusters[clust][2] + (*it).br().y;
+
+			clusters[clust][2] = clusters[clust][2] + 1;
+
+			clusters[clust][0] = sumX / clusters[clust][2];
+			clusters[clust][1] = sumY / clusters[clust][2];
+
+			rectangles[clust][0] = sumX0 / clusters[clust][2];
+			rectangles[clust][1] = sumY0 / clusters[clust][2];
+			rectangles[clust][2] = sumX1 / clusters[clust][2];
+			rectangles[clust][3] = sumY1 / clusters[clust][2];
+
+			dart_mask[i] = clust;
+
+		}
+		else{
+			dart_mask[i] = -1;
+		}
+		++i;
+		++it;
+	}
+
+	vector<Rect> finalOut;
+	for(int i=0;i<num_clusters;i++)
+	{
+		Rect r(rectangles[i][0],rectangles[i][1],rectangles[i][2]-rectangles[i][0],rectangles[i][3]-rectangles[i][1]);
+		finalOut.push_back(r);
+	}
+
+  /*for(int i=0;i<output.size();i++){
+		if(dart_mask[i]>=0){
+			Rect r(output[i]);
+			finalOut.push_back(r);
+		}
+	}*/
+
+	output = finalOut;
+
+}
+
+int findCluster(int num_clusters, float clusters[][3], int thresh, Rect& rect)
+{
+	int minDistance = 9999;
+	int minClust=-1;
+	Point rectC(rect.x+rect.width/2, rect.y+rect.height/2);
+	for(int i=0;i<num_clusters;i++){
+		Point currentClust(clusters[i][0], clusters[i][1]);
+		double dist = norm(currentClust - rectC);
+		if(dist<minDistance){
+			minDistance = dist;
+			minClust = i;
+		}
+	}
+	if(minDistance<thresh)
+		return minClust;
+	return -1; //no cluster found;
 }
 
 double rectIntersection(Rect A, Rect B){
@@ -170,7 +264,7 @@ void drawRects(Mat& frame, Mat& output, vector<Rect> v)
 double fscore(vector<Rect> ground, vector<Rect> detected)
 {
 	int TP = 0;
-	double thresh = 0.4;
+	double thresh = 0.1;
 	vector<Rect>::iterator itG = ground.begin();
 	while(itG!=ground.end()){
 		bool matched = false;
@@ -194,8 +288,6 @@ double fscore(vector<Rect> ground, vector<Rect> detected)
   int FP = detected.size();
 	int FN = ground.size();
 
-  if(TP+FN+FP == 0)
-		return 1;
 	return (double)2*TP / (double)(2*TP+FN+FP);
 }
 
