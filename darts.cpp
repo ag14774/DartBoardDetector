@@ -107,10 +107,39 @@ void detect( Mat& frame, vector<Rect>& output )
 {
 	Mat frame_gray;
 	Mat frame_gray_norm;
+	Mat frame_blur, frame_dst;
+
+//**************HoughLines**************
+	GaussianBlur( frame, frame_blur, Size(7,7), 0, 0, BORDER_DEFAULT );
+	Canny(frame_blur,frame_dst,50,200,3);
+//	cvtColor(frame,frame_lines,CV_BGR2GRAY);
 	//Mat grad_x, grad_y;
 	//Mat abs_grad_x, abs_grad_y;
 	//Mat grad;
 	//string window_name = "Sobel test";
+	vector<Vec4i> lines; //vector holding lines to be detected
+	vector<Point> midPoints; // vector holding line midpoints
+	Point mid; //line midpoint
+	HoughLinesP(frame_dst, lines, 1, CV_PI/180, 50, 30, 5);
+	for(size_t i=0 ; i<lines.size(); i++ ){
+		line(frame, Point(lines[i][0], lines[i][1]), Point(lines[i][2],lines[i][3]),Scalar(0,255,0),1,8); //draw line
+		mid = Point((lines[i][0]+lines[i][2])*0.5 ,(lines[i][1]+lines[i][3])*0.5);
+		midPoints.push_back(mid);
+		//cout<<midPoints[i]<<endl;
+	}
+	namedWindow("HoughLines",1);
+	imshow("HoughLines",frame);
+	waitKey(0);
+
+	int midScore = 0;
+	int midThreshold = 10;
+	for(size_t i=0 ; i<output.size(); i++){
+		for(size_t j=0; j<midPoints.size(); j++){
+			if(output[i].contains(midPoints[j])) midScore++;
+		}
+		if(midScore<midThreshold) output.erase(output.begin()+i);
+	}
+
 
 	// 1. Prepare Image by turning it into Grayscale
 	cvtColor( frame, frame_gray, CV_BGR2GRAY );
