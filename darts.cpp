@@ -107,12 +107,23 @@ void detect( Mat& frame, vector<Rect>& output )
 {
 	Mat frame_gray;
 	Mat frame_gray_norm;
-	Mat frame_blur, frame_dst;
+	Mat frame_blur,frame_dst;
+	Mat frame_gray2;
 
-//**************HoughLines**************
-	GaussianBlur( frame, frame_blur, Size(7,7), 0, 0, BORDER_DEFAULT );
-	Canny(frame_blur,frame_dst,50,200,3);
-//	cvtColor(frame,frame_lines,CV_BGR2GRAY);
+
+	// 1. Prepare Image by turning it into Grayscale
+	cvtColor( frame, frame_gray, CV_BGR2GRAY );
+	cvtColor( frame, frame_gray2, CV_BGR2GRAY);
+	//Normalise lighting
+  equalizeHist( frame_gray, frame_gray_norm );
+
+	// 2. Perform Viola-Jones Object Detection
+	cascade.detectMultiScale( frame_gray_norm, output, 1.1, 1, 0|CV_HAAR_SCALE_IMAGE, Size(50, 50), Size(500,500) );
+	vector<Rect> output2 = output;
+	//**************HoughLines**************
+	//GaussianBlur( frame_gray, frame_blur, Size(7,7), 0, 0, BORDER_DEFAULT );
+	Canny(frame_gray2,frame_dst,50,200,3);
+	//	cvtColor(frame,frame_lines,CV_BGR2GRAY);
 	//Mat grad_x, grad_y;
 	//Mat abs_grad_x, abs_grad_y;
 	//Mat grad;
@@ -120,35 +131,29 @@ void detect( Mat& frame, vector<Rect>& output )
 	vector<Vec4i> lines; //vector holding lines to be detected
 	vector<Point> midPoints; // vector holding line midpoints
 	Point mid; //line midpoint
-	HoughLinesP(frame_dst, lines, 1, CV_PI/180, 50, 30, 5);
+	HoughLinesP(frame_dst, lines, 1, CV_PI/180, 50, 25, 5);
 	for(size_t i=0 ; i<lines.size(); i++ ){
-		line(frame, Point(lines[i][0], lines[i][1]), Point(lines[i][2],lines[i][3]),Scalar(0,255,0),1,8); //draw line
+		line(frame_gray2, Point(lines[i][0], lines[i][1]), Point(lines[i][2],lines[i][3]),Scalar(0,255,0),1,8); //draw line
 		mid = Point((lines[i][0]+lines[i][2])*0.5 ,(lines[i][1]+lines[i][3])*0.5);
 		midPoints.push_back(mid);
 		//cout<<midPoints[i]<<endl;
 	}
 	namedWindow("HoughLines",1);
-	imshow("HoughLines",frame);
+	imshow("HoughLines",frame_gray2);
 	waitKey(0);
 
-	int midScore = 0;
 	int midThreshold = 10;
-	for(size_t i=0 ; i<output.size(); i++){
+	vector<Rect>::iterator itB = output.begin();
+	while(itB!=output.end()){
+		int midScore = 0;
 		for(size_t j=0; j<midPoints.size(); j++){
-			if(output[i].contains(midPoints[j])) midScore++;
+			if((*itB).contains(midPoints[j])) midScore++;
 		}
-		if(midScore<midThreshold) output.erase(output.begin()+i);
+		if(midScore<midThreshold) output.erase(itB);
+		else ++itB;
 	}
 
-
-	// 1. Prepare Image by turning it into Grayscale
-	cvtColor( frame, frame_gray, CV_BGR2GRAY );
-
-	//Normalise lighting
-  equalizeHist( frame_gray, frame_gray_norm );
-
-	// 2. Perform Viola-Jones Object Detection
-	cascade.detectMultiScale( frame_gray_norm, output, 1.1, 1, 0|CV_HAAR_SCALE_IMAGE, Size(50, 50), Size(500,500) );
+	if(output.size()==0) output=output2;
 
   // 3. Print number of dartboards found
 	cout << output.size() << endl;
