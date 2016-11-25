@@ -121,7 +121,7 @@ void detect( Mat& frame, vector<Rect>& output )
 	cascade.detectMultiScale( frame_gray_norm, output, 1.1, 1, 0|CV_HAAR_SCALE_IMAGE, Size(50, 50), Size(500,500) );
 	vector<Rect> output2 = output;
 	//**************HoughLines**************
-	//GaussianBlur( frame_gray, frame_blur, Size(7,7), 0, 0, BORDER_DEFAULT );
+	GaussianBlur( frame_gray2, frame_gray2, Size(3,3), 0, 0, BORDER_DEFAULT );
 	Canny(frame_gray2,frame_dst,50,200,3);
 	//	cvtColor(frame,frame_lines,CV_BGR2GRAY);
 	//Mat grad_x, grad_y;
