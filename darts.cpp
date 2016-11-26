@@ -18,8 +18,9 @@
 #include "darts_gt.h"
 
 #define MAX_CONCENTRIC 20
-#define MAX_DARTBOARDS 20
-#define EDGEDETECT 1 //1 for CannyEdge
+//#define DEBUG
+//#define GROUND_TRUTH
+#define ONLY_VIOLA_JONES
 
 using namespace std;
 using namespace cv;
@@ -43,13 +44,20 @@ typedef struct{
 /** Function Headers */
 void detect( Mat& frame, vector<Rect>& output );
 void drawRects(Mat& frame, Mat& output, vector<Rect> v);
+void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output);
                                                                            //inverse of resolution in X, Y and R direction
 void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radius, int max_radius,
 											int threshold, int resX, int resY, int resR, vector<ConcentricCircles>& output);
-void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int edge_thresh);
+void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh);
 double rectIntersection(Rect A, Rect B);
 double fscore(vector<Rect> ground, vector<Rect> detected);
-int findCluster(int num_clusters, float clusters[][3], int thresh, Rect& rect);
+
+//******TO-DO*********
+//1)Redo fscore and rectIntersection: a)Use intersection operator b)Take distance from center into account
+//2)Check bounding boxes
+//3)Review detector flowchart
+//4)Implement ellipse detector
+//5)Change step 7 of detect to choose the closest center
 
 /** Global variables */
 CascadeClassifier cascade;
@@ -59,10 +67,6 @@ int main( int argc, const char** argv )
 {
   // 1. Read Input Image
 	Mat frame = imread(argv[1], CV_LOAD_IMAGE_COLOR);
-  Mat src_gray;
-
-	/// Convert it to gray
-  cvtColor( frame, src_gray, COLOR_BGR2GRAY );
 
 	string fullname(argv[1]);
 	int index = findIndexOfFile(fullname);
@@ -76,7 +80,7 @@ int main( int argc, const char** argv )
 
 	// 3. Detect dartboards
 	detect( frame, output );
-
+  cout<<"Number of dartboards found: "<<output.size()<<endl<<endl;
 	// 4. Draw result
 	drawRects(frame, frame_output, output);
 
@@ -90,10 +94,12 @@ int main( int argc, const char** argv )
 		cout << "*****F1 SCORE*****" << endl;
 		cout << fscore(gt, output) << endl;
 		cout << "******************" << endl;
-		//Mat testRect;
-		//drawRects(frame, testRect, gt);
-		//imshow("Test Rects", testRect);
-		//waitKey(0);
+		#ifdef GROUND_TRUTH
+		Mat testRect;
+		drawRects(frame, testRect, gt);
+		imshow("Test Rects", testRect);
+		waitKey(0);
+		#endif
 	}
 	else{
 		cout << "*****GROUND TRUTH NOT AVAILABLE******" << endl;
@@ -113,133 +119,108 @@ void detect( Mat& frame, vector<Rect>& output )
 
 	// 1. Prepare Image by turning it into Grayscale
 	cvtColor( frame, frame_gray, CV_BGR2GRAY );
-	cvtColor( frame, frame_gray2, CV_BGR2GRAY);
 	//Normalise lighting
   equalizeHist( frame_gray, frame_gray_norm );
 
+
 	// 2. Perform Viola-Jones Object Detection
 	cascade.detectMultiScale( frame_gray_norm, output, 1.1, 1, 0|CV_HAAR_SCALE_IMAGE, Size(50, 50), Size(500,500) );
-	vector<Rect> output2 = output;
-	//**************HoughLines**************
-	GaussianBlur( frame_gray2, frame_gray2, Size(3,3), 0, 0, BORDER_DEFAULT );
-	Canny(frame_gray2,frame_dst,50,200,3);
-	//	cvtColor(frame,frame_lines,CV_BGR2GRAY);
-	//Mat grad_x, grad_y;
-	//Mat abs_grad_x, abs_grad_y;
-	//Mat grad;
-	//string window_name = "Sobel test";
-	vector<Vec4i> lines; //vector holding lines to be detected
-	vector<Point> midPoints; // vector holding line midpoints
-	Point mid; //line midpoint
-	HoughLinesP(frame_dst, lines, 1, CV_PI/180, 50, 25, 5);
-	for(size_t i=0 ; i<lines.size(); i++ ){
-		line(frame_gray2, Point(lines[i][0], lines[i][1]), Point(lines[i][2],lines[i][3]),Scalar(0,255,0),1,8); //draw line
-		mid = Point((lines[i][0]+lines[i][2])*0.5 ,(lines[i][1]+lines[i][3])*0.5);
-		midPoints.push_back(mid);
-		//cout<<midPoints[i]<<endl;
-	}
-	namedWindow("HoughLines",1);
-	imshow("HoughLines",frame_gray2);
-	waitKey(0);
+	cout << "Dartboards found using Viola-Jones: "<<output.size()<<endl<<endl;
 
-	int midThreshold = 10;
-	vector<Rect>::iterator itB = output.begin();
-	while(itB!=output.end()){
-		int midScore = 0;
-		for(size_t j=0; j<midPoints.size(); j++){
-			if((*itB).contains(midPoints[j])) midScore++;
-		}
-		if(midScore<midThreshold) output.erase(itB);
-		else ++itB;
+  #ifdef ONLY_VIOLA_JONES
+	return;
+	#endif
+
+	// 3. Hough lines
+  vector<Rect> output2 = output;
+  HoughLinesFilter(frame_gray, output);
+	cout << "Bounding boxes left: "<<output.size() << endl << endl;
+	if(output.size()==0){
+		cout<<"Hough Lines failed to detect any dartboards. Undoing..."<<endl;
+		output=output2;
+		cout << "Bounding boxes left: "<<output.size() << endl << endl;
 	}
 
-	if(output.size()==0) output=output2;
 
-  // 3. Print number of dartboards found
-	cout << output.size() << endl;
-
-//***************TESTING*********************
+// 4. Extract edges as a 1D array
   vector<EdgePointInfo> edges;
-	extractEdges(frame_gray, output, edges, 20);
-	cout<<edges.size()<<endl;
+	extractEdges(frame_gray, output, edges, 1, 30);
+	cout<<"Edge pixels found: "<<edges.size()<<endl<<endl;
+
+
+// 5. Detect concentric circles
 	vector<ConcentricCircles> circs;
 	int min_radius=15,max_radius=150,thres=300,resX=6,resY=6,resR=7;
 	detectConcentric(edges, frame_gray.size(), min_radius, max_radius, thres, resX, resY, resR, circs);
-	cout<<circs.size()<<endl;
+	cout<<endl<<"Found "<< circs.size() << " concentric circles:" << endl;
 	for(vector<ConcentricCircles>::iterator it = circs.begin();it!=circs.end();++it){
-		cout << (*it).xc <<" "<<(*it).yc<<" ";
+		cout << "("<<(*it).xc <<", "<<(*it).yc<<"): ";
 		for(int i=0;i<(*it).num;i++){
 			cout << (*it).rs[i] << " ";
 		}
 		cout << endl;
 	}
-//*******************************************
+	cout << endl;
 
-  int distance_thr = 50;
+
+// 6. Accumulate all centers
+  vector<Point> centers;
+	for(vector<ConcentricCircles>::iterator cir=circs.begin();cir!=circs.end();++cir){
+		Point cirC( (*cir).xc, (*cir).yc );
+		centers.push_back(cirC);
+	}
+
+// 7. Cluster bounding boxes based on nearby centers
+  int distance_thr = 80;
 	int dart_mask[output.size()] = {0};
 	for(unsigned int i = 0; i<output.size();++i){
-		for(vector<ConcentricCircles>::iterator cir=circs.begin();cir!=circs.end();++cir){
+		dart_mask[i] = -1;
+		for(unsigned int j=0;j<centers.size();j++){
 			Point rectC( output[i].x+output[i].width/2, output[i].y+output[i].height/2 );
-			Point cirC( (*cir).xc, (*cir).yc );
-			double dist = norm(rectC-cirC);
-			int minDim = min(output[i].width, output[i].height);
+			Point circC( centers[j] );
+			double dist = norm(rectC-circC);
+			//int minDim = min(output[i].width, output[i].height);
 			if(dist<distance_thr){
-				dart_mask[i] = 1;
+				dart_mask[i] = j;
 				break;
 			}
-
 		}
 	}
-
-	for(int i=0;i<output.size();i++)
+	cout<<"Clustering:  ";
+	for(unsigned int i=0;i<output.size();i++)
 	  cout<<dart_mask[i]<<" ";
-	cout<<endl;
-  //detect clusters
-  int num_clusters = 0;
-	float clusters[MAX_DARTBOARDS][3] = {0}; //(x,y,num)
-	float rectangles[MAX_DARTBOARDS][4] = {0}; //(x0,y0,x1,y1)
-	int i = 0;
-	vector<Rect>::iterator it=output.begin();
-	while(it!=output.end()){
-  	if(dart_mask[i]>0){
-			int clust = findCluster(num_clusters, clusters, 200, *it);
-			//cout<<"test"<<endl;
-			if(clust<0){
-				clust = num_clusters++;
+	cout<<endl<<endl;
+
+// 8. Merge bounding boxes per cluster
+  vector<Rect> finalOut;
+  for(int j=0;j<centers.size();j++){
+		double tlX=0;
+		double tlY=0;
+		double brX=0;
+		double brY=0;
+		double sumWeight = 0;
+		bool matchFound = false;
+		for(unsigned int i=0;i<output.size();i++){
+			if(dart_mask[i]==j){
+				matchFound = true;
+				Point rectC( output[i].x+output[i].width/2, output[i].y+output[i].height/2 );
+				Point circC( centers[j] );
+				double dist = norm(rectC-circC);
+				double weight = 1.0/dist; //inverse proportional to distance
+				sumWeight += weight;
+				tlX += weight*output[i].tl().x;
+				tlY += weight*output[i].tl().y;
+				brX += weight*output[i].br().x;
+				brY += weight*output[i].br().y;
 			}
-			int sumX = clusters[clust][0] * clusters[clust][2] + (*it).x+(*it).width/2;
-			int sumY = clusters[clust][1] * clusters[clust][2] + (*it).y+(*it).height/2;
-
-			int sumX0 = rectangles[clust][0] * clusters[clust][2] + (*it).tl().x;
-			int sumY0 = rectangles[clust][1] * clusters[clust][2] + (*it).tl().y;
-			int sumX1 = rectangles[clust][2] * clusters[clust][2] + (*it).br().x;
-			int sumY1 = rectangles[clust][3] * clusters[clust][2] + (*it).br().y;
-
-			clusters[clust][2] = clusters[clust][2] + 1;
-
-			clusters[clust][0] = sumX / clusters[clust][2];
-			clusters[clust][1] = sumY / clusters[clust][2];
-
-			rectangles[clust][0] = sumX0 / clusters[clust][2];
-			rectangles[clust][1] = sumY0 / clusters[clust][2];
-			rectangles[clust][2] = sumX1 / clusters[clust][2];
-			rectangles[clust][3] = sumY1 / clusters[clust][2];
-
-			dart_mask[i] = clust;
-
 		}
-		else{
-			dart_mask[i] = -1;
-		}
-		++i;
-		++it;
-	}
-
-	vector<Rect> finalOut;
-	for(int i=0;i<num_clusters;i++)
-	{
-		Rect r(rectangles[i][0],rectangles[i][1],rectangles[i][2]-rectangles[i][0],rectangles[i][3]-rectangles[i][1]);
-		finalOut.push_back(r);
+		if(matchFound)
+		{
+			Point newTL(tlX/sumWeight,tlY/sumWeight);
+			Point newBR(brX/sumWeight,brY/sumWeight);
+	    Rect box(newTL, newBR);
+			finalOut.push_back(box);
+	  }
 	}
 
   /*for(int i=0;i<output.size();i++){
@@ -253,22 +234,81 @@ void detect( Mat& frame, vector<Rect>& output )
 
 }
 
-int findCluster(int num_clusters, float clusters[][3], int thresh, Rect& rect)
+void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 {
-	int minDistance = 9999;
-	int minClust=-1;
-	Point rectC(rect.x+rect.width/2, rect.y+rect.height/2);
-	for(int i=0;i<num_clusters;i++){
-		Point currentClust(clusters[i][0], clusters[i][1]);
-		double dist = norm(currentClust - rectC);
-		if(dist<minDistance){
-			minDistance = dist;
-			minClust = i;
-		}
+	Mat src_gray = frame_gray.clone();
+	Mat edges;
+
+// 	/// Detector parameters
+//  int blockSize = 2;
+//  int apertureSize = 3;
+//  double k = 0.04;
+// Mat dst,dst_norm,dst_norm_scaled;
+//  /// Detecting corners
+//  cornerHarris( src_gray, dst, blockSize, apertureSize, k, BORDER_DEFAULT );
+//  /// Normalizing
+// normalize( dst, dst_norm, 0, 255, NORM_MINMAX, CV_32FC1, Mat() );
+// convertScaleAbs( dst_norm, dst_norm_scaled );
+//  /// Drawing a circle around corners
+// for( int j = 0; j < dst_norm.rows ; j++ )
+// 	 { for( int i = 0; i < dst_norm.cols; i++ )
+// 				{
+// 					if( (int) dst_norm.at<float>(j,i) > 150 )
+// 						{
+// 						 circle( dst_norm_scaled, Point( i, j ), 5,  Scalar(0), 2, 8, 0 );
+// 						}
+// 				}
+// 	 }
+//
+//  imshow("harris edges",dst_norm_scaled);
+//  waitKey(0);
+
+  //blur( src_gray, src_gray, Size(9,9) );
+	GaussianBlur( src_gray, src_gray, Size(7,7), 0, 0, BORDER_DEFAULT );
+
+	int kernel = 3;
+	int ratio = 3;
+	int low_threshold=30;
+
+	Canny(src_gray, edges, low_threshold, low_threshold*ratio, kernel, true);
+	#ifdef DEBUG
+	imshow("Hough Edges",edges);
+	waitKey(0);
+	#endif
+
+	vector<Vec4i> lines; //vector holding lines to be detected
+	HoughLinesP(edges, lines, 3, 1*CV_PI/180, 70, 15, 10);
+	//HoughLinesP(edges, lines, 1, 2*CV_PI/180, 50, 15, 20);
+	//HoughLinesP(edges, lines, 1, CV_PI/180, 50, 10, 25);
+
+	vector<Point> midPoints; // vector holding line midpoints
+	Point mid; //line midpoint
+	for(size_t i=0 ; i<lines.size(); i++ ){
+		//line(src_gray, Point(lines[i][0], lines[i][1]), Point(lines[i][2],lines[i][3]),Scalar(0,255,0),1,8); //draw line
+		mid = Point((lines[i][0]+lines[i][2])/2 ,(lines[i][1]+lines[i][3])/2);
+		circle( src_gray, mid, 3,  Scalar(0), 2, 8, 0 );
+		midPoints.push_back(mid);
+		//cout<<midPoints[i]<<endl;
 	}
-	if(minDistance<thresh)
-		return minClust;
-	return -1; //no cluster found;
+	#ifdef DEBUG
+	namedWindow("HoughLines",1);
+	imshow("HoughLines",src_gray);
+	waitKey(0);
+	#endif
+
+	double midThreshold = 0.002;
+	vector<Rect>::iterator it = output.begin();
+	cout<<"****Calculating line scores****"<<endl;
+	while(it!=output.end()){
+		int midScore = 0;
+		for(size_t j=0; j<midPoints.size(); j++){
+			if((*it).contains(midPoints[j])) midScore++;
+		}
+		double required = midThreshold * (*it).area();
+		cout<<(*it)<<"  \tScore: "<<midScore<<". Required: "<<required<<endl;
+		if(midScore<required) it=output.erase(it);
+		else ++it;
+	}
 }
 
 double rectIntersection(Rect A, Rect B){
@@ -298,7 +338,7 @@ void drawRects(Mat& frame, Mat& output, vector<Rect> v)
 double fscore(vector<Rect> ground, vector<Rect> detected)
 {
 	int TP = 0;
-	double thresh = 0.1;
+	double thresh = 0.3;
 	vector<Rect>::iterator itG = ground.begin();
 	while(itG!=ground.end()){
 		bool matched = false;
@@ -336,10 +376,9 @@ bool valid(int num, int min, int max){
 void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radius, int max_radius,
 											int threshold, int resX, int resY, int resR, vector<ConcentricCircles>& output)
 {
-	int min_distance = max(imsize.height,imsize.width)/8;
-	cout<<min_distance<<endl;
+	int min_distance = max(imsize.height,imsize.width)/5;
 	int vote_around_radius = 0; //measured in bins
-	int SHIFT = 10; int ONE = 1<<SHIFT;
+
   int ndims = 3;
 	double low_threshold = threshold * 0.4;
 	int sizes[3] = { imsize.height/resY, imsize.width/resX, (max_radius-min_radius)/resR };
@@ -446,7 +485,7 @@ void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radiu
 	//waitKey(0);
 }
 
-void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int edge_thresh)
+void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh)
 {
   float magScale = 255.f/1442.f;
 	int scale = 1;
@@ -458,12 +497,7 @@ void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeLi
 	thres.create(src.size(),src.type());
 	grad.create(src.size(),src.type());
 
-	GaussianBlur( src, src, Size(7,7), 0, 0, BORDER_DEFAULT );
-
-  int lowThreshold = 50;
-	int ratio = 3;
-	int kernel_size = 3;
-	Canny( src,  thres, lowThreshold, lowThreshold*ratio, kernel_size );
+	GaussianBlur( src, src, Size(5,5), 0, 0, BORDER_DEFAULT );
 
 	Sobel( src, dx, CV_16S, 1, 0, 3, scale, delta, BORDER_DEFAULT );
 	Sobel( src, dy, CV_16S, 0, 1, 3, scale, delta, BORDER_DEFAULT );
@@ -471,65 +505,90 @@ void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeLi
   int nRows = src.rows;
 	int nCols = src.cols;
 
-  for(int i=0;i<nRows;++i)
+  if(method == 0)
 	{
-		short int* dx_ptr = dx.ptr<short int>(i);
-		short int* dy_ptr = dy.ptr<short int>(i);
-		uchar* thres_ptr  = thres.ptr<uchar>(i);
-		uchar* grad_ptr    = grad.ptr<uchar>(i);
-    for(int j = 0;j<nCols;j++)
+		for(int i=0;i<nRows;++i)
 		{
-			//TODO: CHECK IF POINT IS CONTAINED IN ONE OF THE RECTS RETURNED BY VIOLA
-			double psi = atan2((double)dy_ptr[j]/8.0,(double)dx_ptr[j]/8.0);
-			grad_ptr[j] = (uchar)255*(psi-(-pi))/(2*pi);
-			#if EDGEDETECT==0
-			double mag = magScale*sqrt(dx_ptr[j]*dx_ptr[j]+dy_ptr[j]*dy_ptr[j]);
-			Point epiPoint(j,i);
-			if(mag > edge_thresh){
-				bool contained = false;
-				for(vector<Rect>::iterator it = v.begin(); it!= v.end(); ++it){
-					if((*it).contains(epiPoint)){
-						contained = true;
-						break;
-					}
-				}
-				if(contained){
-					thres_ptr[j] = 255;
-					EdgePointInfo epi;
-					epi.x = j;
-					epi.y = i;
-					epi.grad = psi;
-	 				edgeList.push_back(epi);
-				}
-			}
-			else{
-				thres_ptr[j] = 0;
-			}
-			#else
-			if(thres_ptr[j]==255){
+			short int* dx_ptr = dx.ptr<short int>(i);
+			short int* dy_ptr = dy.ptr<short int>(i);
+			uchar* thres_ptr  = thres.ptr<uchar>(i);
+			uchar* grad_ptr    = grad.ptr<uchar>(i);
+	    for(int j = 0;j<nCols;j++)
+			{
+				double psi = atan2((double)dy_ptr[j]/8.0,(double)dx_ptr[j]/8.0);
+				grad_ptr[j] = (uchar)255*(psi-(-pi))/(2*pi);
+				double mag = magScale*sqrt(dx_ptr[j]*dx_ptr[j]+dy_ptr[j]*dy_ptr[j]);
+				Point epiPoint(j,i);
 				EdgePointInfo epi;
 				epi.x = j;
 				epi.y = i;
 				epi.grad = psi;
-				Point epiPoint(epi.x,epi.y);
-				vector<Rect>::iterator it;
-				for(it = v.begin(); it!= v.end(); ++it){
-					if((*it).contains(epiPoint)){
+				if(mag > edge_thresh){
+					vector<Rect>::iterator it;
+					for(it = v.begin(); it!= v.end(); ++it){
+						if((*it).contains(epiPoint)){
+							thres_ptr[j] = 255;
+							edgeList.push_back(epi);
+							break;
+						}
+					}
+					if(it==v.end())
+						thres_ptr[j] = 0;
+					if(v.size()==0) // If mask is empty, include the edge anyway
+					{
+						thres_ptr[j] = 255;
 						edgeList.push_back(epi);
-						break;
 					}
 				}
-				if(it==v.end())
+				else{
 					thres_ptr[j] = 0;
+				}
 			}
-			#endif
 		}
-	}
-
+  }
+  else{
+		int ratio = 3;
+		int kernel_size = 3;
+		Canny( src,  thres, edge_thresh, edge_thresh*ratio, kernel_size, true );
+	  for(int i=0;i<nRows;++i)
+		{
+			short int* dx_ptr = dx.ptr<short int>(i);
+			short int* dy_ptr = dy.ptr<short int>(i);
+			uchar* thres_ptr  = thres.ptr<uchar>(i);
+			uchar* grad_ptr    = grad.ptr<uchar>(i);
+	    for(int j = 0;j<nCols;j++)
+			{
+				double psi = atan2((double)dy_ptr[j]/8.0,(double)dx_ptr[j]/8.0);
+				grad_ptr[j] = (uchar)255*(psi-(-pi))/(2*pi);
+				if(thres_ptr[j]==255){
+					EdgePointInfo epi;
+					epi.x = j;
+					epi.y = i;
+					epi.grad = psi;
+					Point epiPoint(epi.x,epi.y);
+					vector<Rect>::iterator it;
+					for(it = v.begin(); it!= v.end(); ++it){
+						if((*it).contains(epiPoint)){
+							edgeList.push_back(epi);
+							break;
+						}
+					}
+					if(it==v.end())
+						thres_ptr[j] = 0;
+					if(v.size()==0) // If mask is empty, include the edge anyway
+					{
+						edgeList.push_back(epi);
+					}
+				}
+			}
+		}
+  }
+	#ifdef DEBUG
 	namedWindow("Gradient",CV_WINDOW_AUTOSIZE);
 	imshow("Gradient", grad);
 	namedWindow("Thresholded magnitude",CV_WINDOW_AUTOSIZE);
 	imshow("Thresholded magnitude", thres);
 	waitKey(0);
+	#endif
 
 }
