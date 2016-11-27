@@ -16,7 +16,7 @@ using namespace cv;
 String cascade_name = "dartcascade/cascade.xml";
 
 Rect dart0gt[1] = {Rect(427,0,193,215)};
-Rect dart1gt[1] = {Rect(170,292,248,61)};
+Rect dart1gt[1] = {Rect(170,108,248,246)};
 Rect dart2gt[1] = {Rect(93,87,108,110)};
 Rect dart3gt[1] = {Rect(316,142,83,91)};
 Rect dart4gt[1] = {Rect(160,67,205,213)};

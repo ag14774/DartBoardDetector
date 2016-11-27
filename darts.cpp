@@ -14,13 +14,14 @@
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <stdio.h>
+#include <omp.h>
 //#include "face_gt.h"
 #include "darts_gt.h"
 
 #define MAX_CONCENTRIC 20
-//#define DEBUG
-//#define GROUND_TRUTH
-#define ONLY_VIOLA_JONES
+#define DEBUG
+#define GROUND_TRUTH
+//#define ONLY_VIOLA_JONES
 
 using namespace std;
 using namespace cv;
@@ -41,6 +42,25 @@ typedef struct{
 	double grad;
 }EdgePointInfo;
 
+typedef struct MyEllipse{
+	MyEllipse(int nxc, int nyc, float nangle, int nmajor, int nminor, int naccum)
+	{
+		xc=nxc;
+		yc=nyc;
+		angle=nangle;
+		major=nmajor;
+		minor=nminor;
+		accum=naccum;
+	}
+	int xc;
+	int yc;
+	float angle;
+	int major;
+	int minor;
+	int accum;
+
+}MyEllipse;
+
 /** Function Headers */
 void detect( Mat& frame, vector<Rect>& output );
 void drawRects(Mat& frame, Mat& output, vector<Rect> v);
@@ -48,16 +68,17 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output);
                                                                            //inverse of resolution in X, Y and R direction
 void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radius, int max_radius,
 											int threshold, int resX, int resY, int resR, vector<ConcentricCircles>& output);
+void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor);
 void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh);
 double rectIntersection(Rect A, Rect B);
 double fscore(vector<Rect> ground, vector<Rect> detected);
 
 //******TO-DO*********
-//1)Redo fscore and rectIntersection: a)Use intersection operator b)Take distance from center into account
-//2)Check bounding boxes
-//3)Review detector flowchart
-//4)Implement ellipse detector
-//5)Change step 7 of detect to choose the closest center
+//1)Redo fscore and rectIntersection: Use intersection operator
+//2)Review detector flowchart
+//3)Implement ellipse detector
+//4)Change step 7 of "detect" to choose the closest center instead of the first
+//5)Function to convert 3D hough space to 2D
 
 /** Global variables */
 CascadeClassifier cascade;
@@ -122,7 +143,6 @@ void detect( Mat& frame, vector<Rect>& output )
 	//Normalise lighting
   equalizeHist( frame_gray, frame_gray_norm );
 
-
 	// 2. Perform Viola-Jones Object Detection
 	cascade.detectMultiScale( frame_gray_norm, output, 1.1, 1, 0|CV_HAAR_SCALE_IMAGE, Size(50, 50), Size(500,500) );
 	cout << "Dartboards found using Viola-Jones: "<<output.size()<<endl<<endl;
@@ -141,13 +161,23 @@ void detect( Mat& frame, vector<Rect>& output )
 		cout << "Bounding boxes left: "<<output.size() << endl << endl;
 	}
 
+  vector<Rect> dummy;
 
 // 4. Extract edges as a 1D array
   vector<EdgePointInfo> edges;
-	extractEdges(frame_gray, output, edges, 1, 30);
+	//extractEdges(frame_gray, output, edges, 1, 30);
+	extractEdges(frame_gray, dummy, edges, 1, 30);
 	cout<<"Edge pixels found: "<<edges.size()<<endl<<endl;
 
-
+  vector<MyEllipse> ellipses;
+	int threshold = 120, minMajor = 10, maxMajor = 200;
+  detectEllipse(edges, ellipses, threshold, minMajor, maxMajor);
+	cout<<"Ellipses found: "<<ellipses.size()<<endl;
+	for(int i=0;i<ellipses.size();i++){
+		cout<<ellipses[i].xc<<" "<<ellipses[i].yc<<" "<<ellipses[i].angle*180/pi<<" "<<ellipses[i].accum<<endl;
+		ellipse(frame, Point(ellipses[i].xc,ellipses[i].yc),Size(ellipses[i].major,ellipses[i].minor),ellipses[i].angle*180/pi,0,360,Scalar(0,255,0),2);
+	}
+return;
 // 5. Detect concentric circles
 	vector<ConcentricCircles> circs;
 	int min_radius=15,max_radius=150,thres=300,resX=6,resY=6,resR=7;
@@ -193,7 +223,7 @@ void detect( Mat& frame, vector<Rect>& output )
 
 // 8. Merge bounding boxes per cluster
   vector<Rect> finalOut;
-  for(int j=0;j<centers.size();j++){
+  for(size_t j=0;j<centers.size();j++){
 		double tlX=0;
 		double tlY=0;
 		double brX=0;
@@ -201,7 +231,7 @@ void detect( Mat& frame, vector<Rect>& output )
 		double sumWeight = 0;
 		bool matchFound = false;
 		for(unsigned int i=0;i<output.size();i++){
-			if(dart_mask[i]==j){
+			if(dart_mask[i]==(int)j){
 				matchFound = true;
 				Point rectC( output[i].x+output[i].width/2, output[i].y+output[i].height/2 );
 				Point circC( centers[j] );
@@ -264,11 +294,11 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 //  waitKey(0);
 
   //blur( src_gray, src_gray, Size(9,9) );
-	GaussianBlur( src_gray, src_gray, Size(7,7), 0, 0, BORDER_DEFAULT );
+	GaussianBlur( src_gray, src_gray, Size(9,9), 0, 0, BORDER_DEFAULT );
 
 	int kernel = 3;
 	int ratio = 3;
-	int low_threshold=30;
+	int low_threshold=60;
 
 	Canny(src_gray, edges, low_threshold, low_threshold*ratio, kernel, true);
 	#ifdef DEBUG
@@ -277,14 +307,14 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	#endif
 
 	vector<Vec4i> lines; //vector holding lines to be detected
-	HoughLinesP(edges, lines, 3, 1*CV_PI/180, 70, 15, 10);
+	//HoughLinesP(edges, lines, 3, 1*CV_PI/180, 70, 15, 10);
 	//HoughLinesP(edges, lines, 1, 2*CV_PI/180, 50, 15, 20);
-	//HoughLinesP(edges, lines, 1, CV_PI/180, 50, 10, 25);
+	HoughLinesP(edges, lines, 1, 2*CV_PI/180, 15, 15, 5);//15,15,5 works
 
 	vector<Point> midPoints; // vector holding line midpoints
 	Point mid; //line midpoint
 	for(size_t i=0 ; i<lines.size(); i++ ){
-		//line(src_gray, Point(lines[i][0], lines[i][1]), Point(lines[i][2],lines[i][3]),Scalar(0,255,0),1,8); //draw line
+		line(src_gray, Point(lines[i][0], lines[i][1]), Point(lines[i][2],lines[i][3]),Scalar(0,255,0),1,8); //draw line
 		mid = Point((lines[i][0]+lines[i][2])/2 ,(lines[i][1]+lines[i][3])/2);
 		circle( src_gray, mid, 3,  Scalar(0), 2, 8, 0 );
 		midPoints.push_back(mid);
@@ -296,7 +326,8 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	waitKey(0);
 	#endif
 
-	double midThreshold = 0.002;
+	// double midThreshold = 0.002;
+	double midThreshold = 0.001;//0.0015
 	vector<Rect>::iterator it = output.begin();
 	cout<<"****Calculating line scores****"<<endl;
 	while(it!=output.end()){
@@ -305,8 +336,8 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 			if((*it).contains(midPoints[j])) midScore++;
 		}
 		double required = midThreshold * (*it).area();
-		cout<<(*it)<<"  \tScore: "<<midScore<<". Required: "<<required<<endl;
-		if(midScore<required) it=output.erase(it);
+		cout<<(*it)<<"  \tScore: "<<midScore<<". Required: "<<(int)required<<endl;
+		if(midScore<(int)required) it=output.erase(it);
 		else ++it;
 	}
 }
@@ -372,6 +403,207 @@ bool valid(int num, int min, int max){
     return false;
   return true;
 }
+
+void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor)
+{
+	double eps = 0.0001;
+	int rotationSpan = 90;
+	float minAspectRatio = 0.1;
+	size_t edgeNum = edgeList.size();
+
+	cout<<"Possible major axes: "<<edgeNum*edgeNum<<endl;
+
+  vector<int> I; //I.reserve(edgeNum*edgeNum);
+	vector<int> J; //J.reserve(edgeNum*edgeNum);
+	vector<int> distsSq;// distsSq.reserve(edgeNum*edgeNum);
+
+	for(size_t i=0;i<edgeNum;i++){
+		for(size_t j=i+1;j<edgeNum;j++){ //Inner loop can be vectorised
+			//cout<<i<<" "<<j<<endl;
+			int x1 = edgeList[i].x;
+			int x2 = edgeList[j].x;
+			int y1 = edgeList[i].y;
+			int y2 = edgeList[j].y;
+
+			int length = (x2-x1)*(x2-x1) + (y2-y1)*(y2-y1);
+			//distsSq[j][i] = distsSq[i][j];
+			if(length<maxMajor*maxMajor && length>minMajor*minMajor)
+			{
+				I.push_back(i);
+				J.push_back(j);
+				distsSq.push_back(length);
+			}
+		}
+	}
+
+  size_t npairs = I.size();
+
+	cout<<"Possible major axes after length constraint: "<<npairs<<endl;
+
+  //ANGULAR CONSTRAINT HERE IF NEEDED
+
+  int randomise = 2;
+	int* perm = new int[npairs]; //allocate memory
+
+	#pragma omp parallel for
+	for(size_t i = 0; i < npairs; i++) {
+		perm[i] = i;
+	}
+
+  //CONSIDER THROWING A COIN FOR EACH PAIR
+  size_t subset_max = npairs;
+	if(randomise>0){
+		random_shuffle( &perm[0], &perm[npairs] ); //Use MergeShuffle
+		subset_max = min(npairs, randomise * edgeNum);
+	}
+
+	cout<<"Possible major axes after randomisation: "<<subset_max<<endl;
+
+	for(size_t i = 0;i<subset_max;i++)
+	{
+		int x1 = edgeList[I[perm[i]]].x, y1 = edgeList[I[perm[i]]].y;
+		int x2 = edgeList[J[perm[i]]].x, y2 = edgeList[J[perm[i]]].y;
+		int x0 = (x1+x2)/2, y0=(y1+y2)/2;
+		float a_sq = distsSq[perm[i]]/4.0f;
+
+		// vector<int> thirdPointDist_sq;
+		// thirdPointDist_sq.resize(edgeNum,0);
+		//
+		// vector<int> f_sq;
+		// f_sq.resize(edgeNum,0);
+		//
+		// vector<float> costau;
+		// costau.resize(edgeNum,0);
+		//
+		// vector<float> sintau_sq;
+		// sintau_sq.resize(edgeNum,0);
+		//
+		// vector<float> b;
+		// b.resize(edgeNum,0);
+		//
+		// vector<int> bins;
+		// bins.resize(edgeNum,0);
+		//
+		vector<int> accum;
+		accum.resize(maxMajor,0);
+
+		int bestMinor = 0;
+
+		#pragma omp parallel
+		{
+		float thirdPointDist_sq;
+		float f_sq;
+		float costau;
+		float sintau_sq;
+		float b;
+		int bin;
+		vector<int> local_accum;
+		local_accum.resize(maxMajor,0);
+		#pragma omp for private(thirdPointDist_sq,f_sq,costau,sintau_sq,b,bin)
+		for(size_t k = 0; k < edgeNum; k++) {
+			EdgePointInfo p = edgeList[k];
+			thirdPointDist_sq = (p.x-x0)*(p.x-x0) + (p.y-y0)*(p.y-y0);
+			if(thirdPointDist_sq > a_sq)
+			{
+				thirdPointDist_sq = -1; //flag that means do not process
+			}
+			else{
+				f_sq = (p.x-x2)*(p.x-x2) + (p.y-y2)*(p.y-y2);
+				//cout<<f_sq<<endl;
+				//Cosine rule
+				costau = ( a_sq + thirdPointDist_sq - f_sq ) / ( 2*sqrt(a_sq*thirdPointDist_sq) );
+				costau = min(1.0f, max(-1.0f, costau)); //clip between -1 and 1
+				//cout<<costau<<endl;
+				sintau_sq = 1-costau*costau;
+				b = sqrt( (a_sq * thirdPointDist_sq * sintau_sq) / (a_sq - thirdPointDist_sq * costau * costau + eps) );
+				//cout<<b<<endl;
+				bin = ceil(b+eps);
+				//cout<<bin<<endl;
+				local_accum[bin]++;
+			}
+		}
+		#pragma omp critical
+		{
+			for(int n=0;n<maxMajor;n++){
+				accum[n] += local_accum[n];
+			}
+		}
+	  }
+		//GaussianBlur( accum, accum, Size(1,5), 0, 0, BORDER_DEFAULT );
+		int* element = max_element(&accum[ceil(sqrt(a_sq)*minAspectRatio)],&accum[maxMajor]);
+		bestMinor = distance(&accum[0], element);
+		if(*element>threshold)
+			output.push_back(MyEllipse(x0, y0, atan2(y1-y2,x1-x2), sqrt(a_sq), bestMinor, *element));
+		fill(accum.begin(), accum.end(), 0);
+	}
+	cout<<output.size()<<endl;
+
+
+
+	delete(perm); //free memory
+
+}
+
+// void detectEllipse(vector<EdgePointInfo> edgeList, vector<Ellipse>& output, int threshold, int minMajor, int maxMajor, int minMinor, int maxMinor)
+// {
+// 	int accum[maxMinor] = {0};
+// 	for(unsigned int i=0;i<edgeList.size();i++)
+// 	{
+// 		cout<<i<<endl;
+// 		Point p1(edgeList[i].x, edgeList[i].y);
+// 		for(unsigned int j=i+1;j<edgeList.size();j++)
+// 		{
+// 			Point p2(edgeList[j].x, edgeList[j].y);
+// 			double dist = norm(p1-p2);
+// 			if(dist>=minMajor && dist<=maxMajor)
+// 			{
+// 				Point p0( (p1+p2)/2 );
+// 				double a = dist/2;
+// 				double angle = atan2(p2.y-p1.y, p2.x-p1.x);
+// 				if(angle>pi/2 || angle<-pi/2) continue;
+// 				for(unsigned int k=0;k<edgeList.size();k++)
+// 				{
+// 					//cout<<k<<endl;
+// 					if(k==i||k==j) continue;
+// 					Point p(edgeList[k].x, edgeList[k].y);
+// 					double d = norm(p-p0);
+// 					if(d>minMinor && d < a)
+// 					{
+// 						double f = norm(p-p2);
+// 						double costau = (a*a+d*d-f*f)/(2*a*d);
+// 						if(costau<0) continue;
+// 						double sintau_sq = 1-costau*costau;
+// 						//cout<<"f: "<<f<<" a: "<<a<<" d: "<<d<<" sintau_sq: "<<sintau_sq<<" costau: "<<costau<<endl;
+// 						unsigned int b = round( sqrt( (a*a*d*d*sintau_sq)/(a*a-d*d*costau*costau) ) );
+// 						//cout<<b<<endl;
+// 						accum[b]++;
+// 					}
+// 				}
+// 				int index = 0;
+// 				int max = 0;
+// 				for(int k=0;k<a;k++)
+// 				{
+// 					if(accum[k]>max){
+// 						max = accum[k];
+// 						index = k;
+// 					}
+// 					accum[k] = 0;
+// 				}
+// 				if(max>threshold)
+// 				{
+// 					Ellipse el;
+// 					el.xc = p0.x;
+// 					el.yc = p0.y;
+// 					el.angle = angle;
+// 					el.major = dist;
+// 					el.minor = 2*index;
+// 					cout<<el.xc<<" "<<el.yc<<" "<<el.angle<<" "<<el.major<<" "<<el.minor<<endl;
+// 					output.push_back(el);
+// 				}
+// 			}
+// 		}
+// 	}
+// }
 
 void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radius, int max_radius,
 											int threshold, int resX, int resY, int resR, vector<ConcentricCircles>& output)
@@ -577,6 +809,7 @@ void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeLi
 						thres_ptr[j] = 0;
 					if(v.size()==0) // If mask is empty, include the edge anyway
 					{
+						thres_ptr[j] = 255;
 						edgeList.push_back(epi);
 					}
 				}
