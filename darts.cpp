@@ -73,12 +73,14 @@ void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeLi
 double rectIntersection(Rect A, Rect B);
 double fscore(vector<Rect> ground, vector<Rect> detected);
 
-//******TO-DO*********
+//******TODO*********
 //1)Redo fscore and rectIntersection: Use intersection operator
 //2)Review detector flowchart
 //3)Implement ellipse detector
 //4)Change step 7 of "detect" to choose the closest center instead of the first
 //5)Function to convert 3D hough space to 2D
+//6)Add gaussian blur to accumulator in ellipse detector
+//7)Coin flip for each pair of points instead of randomly permuting the points and picking the first X pairs(possible speedup)
 
 /** Global variables */
 CascadeClassifier cascade;
@@ -466,24 +468,6 @@ void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, in
 		int x0 = (x1+x2)/2, y0=(y1+y2)/2;
 		float a_sq = distsSq[perm[i]]/4.0f;
 
-		// vector<int> thirdPointDist_sq;
-		// thirdPointDist_sq.resize(edgeNum,0);
-		//
-		// vector<int> f_sq;
-		// f_sq.resize(edgeNum,0);
-		//
-		// vector<float> costau;
-		// costau.resize(edgeNum,0);
-		//
-		// vector<float> sintau_sq;
-		// sintau_sq.resize(edgeNum,0);
-		//
-		// vector<float> b;
-		// b.resize(edgeNum,0);
-		//
-		// vector<int> bins;
-		// bins.resize(edgeNum,0);
-		//
 		vector<int> accum;
 		accum.resize(maxMajor,0);
 
@@ -503,22 +487,14 @@ void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, in
 		for(size_t k = 0; k < edgeNum; k++) {
 			EdgePointInfo p = edgeList[k];
 			thirdPointDist_sq = (p.x-x0)*(p.x-x0) + (p.y-y0)*(p.y-y0);
-			if(thirdPointDist_sq > a_sq)
-			{
-				thirdPointDist_sq = -1; //flag that means do not process
-			}
-			else{
+			if(thirdPointDist_sq <= a_sq){
 				f_sq = (p.x-x2)*(p.x-x2) + (p.y-y2)*(p.y-y2);
-				//cout<<f_sq<<endl;
 				//Cosine rule
 				costau = ( a_sq + thirdPointDist_sq - f_sq ) / ( 2*sqrt(a_sq*thirdPointDist_sq) );
 				costau = min(1.0f, max(-1.0f, costau)); //clip between -1 and 1
-				//cout<<costau<<endl;
 				sintau_sq = 1-costau*costau;
 				b = sqrt( (a_sq * thirdPointDist_sq * sintau_sq) / (a_sq - thirdPointDist_sq * costau * costau + eps) );
-				//cout<<b<<endl;
 				bin = ceil(b+eps);
-				//cout<<bin<<endl;
 				local_accum[bin]++;
 			}
 		}
@@ -529,6 +505,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, in
 			}
 		}
 	  }
+		//TODO: ADD GAUSSIAN BLUR
 		//GaussianBlur( accum, accum, Size(1,5), 0, 0, BORDER_DEFAULT );
 		int* element = max_element(&accum[ceil(sqrt(a_sq)*minAspectRatio)],&accum[maxMajor]);
 		bestMinor = distance(&accum[0], element);
@@ -536,9 +513,6 @@ void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, in
 			output.push_back(MyEllipse(x0, y0, atan2(y1-y2,x1-x2), sqrt(a_sq), bestMinor, *element));
 		fill(accum.begin(), accum.end(), 0);
 	}
-	cout<<output.size()<<endl;
-
-
 
 	delete(perm); //free memory
 
