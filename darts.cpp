@@ -68,16 +68,17 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output);
                                                                            //inverse of resolution in X, Y and R direction
 void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radius, int max_radius,
 											int threshold, int resX, int resY, int resR, vector<ConcentricCircles>& output);
+void show3Dhough(Mat& input);
 void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor);
 void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh);
 double rectIntersection(Rect A, Rect B);
 double fscore(vector<Rect> ground, vector<Rect> detected);
 
 //******TODO*********
-//1)Redo fscore and rectIntersection: Use intersection operator
+//1)Redo fscore and rectIntersection: Use intersection operator --> DONE
 //2)Review detector flowchart
-//3)Implement ellipse detector
-//4)Change step 7 of "detect" to choose the closest center instead of the first
+//3)Implement ellipse detector --> DONE - Needs tweaking
+//4)Change step 7 of "detect" to choose the closest center instead of the first --> Need some extra details
 //5)Function to convert 3D hough space to 2D
 //6)Add gaussian blur to accumulator in ellipse detector
 //7)Coin flip for each pair of points instead of randomly permuting the points and picking the first X pairs(possible speedup)
@@ -175,7 +176,7 @@ void detect( Mat& frame, vector<Rect>& output )
 	int threshold = 120, minMajor = 10, maxMajor = 200;
   detectEllipse(edges, ellipses, threshold, minMajor, maxMajor);
 	cout<<"Ellipses found: "<<ellipses.size()<<endl;
-	for(int i=0;i<ellipses.size();i++){
+	for(unsigned int i=0;i<ellipses.size();i++){
 		cout<<ellipses[i].xc<<" "<<ellipses[i].yc<<" "<<ellipses[i].angle*180/pi<<" "<<ellipses[i].accum<<endl;
 		ellipse(frame, Point(ellipses[i].xc,ellipses[i].yc),Size(ellipses[i].major,ellipses[i].minor),ellipses[i].angle*180/pi,0,360,Scalar(0,255,0),2);
 	}
@@ -205,6 +206,7 @@ return;
 // 7. Cluster bounding boxes based on nearby centers
   int distance_thr = 80;
 	int dart_mask[output.size()] = {0};
+	//vector<Point> minCenters
 	for(unsigned int i = 0; i<output.size();++i){
 		dart_mask[i] = -1;
 		for(unsigned int j=0;j<centers.size();j++){
@@ -345,15 +347,8 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 }
 
 double rectIntersection(Rect A, Rect B){
-	Point tlA = A.tl();
-	Point brA = A.br();
-	Point tlB = B.tl();
-	Point brB = B.br();
-
-  double inter_area = max(0, min(brA.x, brB.x) - max(tlA.x, tlB.x)) * max(0, min(brA.y,brB.y) - max(tlA.y, tlB.y));
-
-	return inter_area / (A.area()+B.area()-inter_area);
-
+	Rect C =  A & B;
+	return C.area() / (A.area()+B.area()-C.area());
 }
 
 void drawRects(Mat& frame, Mat& output, vector<Rect> v)
@@ -689,6 +684,32 @@ void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radiu
 	}
 	//imshow("test",accum);
 	//waitKey(0);
+	//Mat hspace2D;
+	//hspace2D.create(original_thr.size(),original_thr.type());
+}
+
+void show3Dhough(Mat& input){
+
+	if(input.dims!=3){
+		cout<<"Insufficient dimensions of input image: < 3 dimensions"<<endl;
+		return;
+	}
+
+	int dimX = input.size[0];
+	int dimY = input.size[1];
+	int dimZ = input.size[2];
+	int sizes[2] = {dimX,dimY};
+
+	Mat output = Mat::zeros(2,sizes,CV_16U);
+
+	for(int x=0; x<dimX; x++){
+		for(int y=0; y<dimY; y++){
+			for(int z=0; z<dimZ; z++){
+				output.at<uchar>(x,y) += input.at<short int>(x,y,z);
+			}
+		}
+	}
+
 }
 
 void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh)
