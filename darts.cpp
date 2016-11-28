@@ -20,7 +20,7 @@
 
 #define MAX_CONCENTRIC 20
 #define DEBUG
-#define GROUND_TRUTH
+//#define GROUND_TRUTH
 //#define ONLY_VIOLA_JONES
 
 using namespace std;
@@ -69,8 +69,9 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output);
 void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radius, int max_radius,
 											int threshold, int resX, int resY, int resR, vector<ConcentricCircles>& output);
 void show3Dhough(Mat& input);
-void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor);
-void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh);
+void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor);
+void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh, int kernel_size);
+Point mergeCloseCenters(vector<Point>& candidate_centers);
 double rectIntersection(Rect A, Rect B);
 double fscore(vector<Rect> ground, vector<Rect> detected);
 
@@ -78,9 +79,9 @@ double fscore(vector<Rect> ground, vector<Rect> detected);
 //1)Redo fscore and rectIntersection: Use intersection operator --> DONE
 //2)Review detector flowchart
 //3)Implement ellipse detector --> DONE - Needs tweaking
-//4)Change step 7 of "detect" to choose the closest center instead of the first --> Need some extra details
-//5)Function to convert 3D hough space to 2D
-//6)Add gaussian blur to accumulator in ellipse detector
+//4)Change step 7 of "detect" to choose the closest center instead of the first --> DONE
+//5)Function to convert 3D hough space to 2D --> DONE
+//6)Add gaussian blur to accumulator in ellipse detector --> DONE
 //7)Coin flip for each pair of points instead of randomly permuting the points and picking the first X pairs(possible speedup)
 
 /** Global variables */
@@ -147,40 +148,33 @@ void detect( Mat& frame, vector<Rect>& output )
   equalizeHist( frame_gray, frame_gray_norm );
 
 	// 2. Perform Viola-Jones Object Detection
+	cout << "**************Performing Viola-Jones**************" << endl;
 	cascade.detectMultiScale( frame_gray_norm, output, 1.1, 1, 0|CV_HAAR_SCALE_IMAGE, Size(50, 50), Size(500,500) );
-	cout << "Dartboards found using Viola-Jones: "<<output.size()<<endl<<endl;
+	cout << "Dartboards found using Viola-Jones: "<<output.size()<<endl;
+	cout << "**************************************************" << endl<<endl;
 
   #ifdef ONLY_VIOLA_JONES
 	return;
 	#endif
 
 	// 3. Hough lines
+	cout << "****Performing Hough transform to detect lines****" << endl;
   vector<Rect> output2 = output;
   HoughLinesFilter(frame_gray, output);
-	cout << "Bounding boxes left: "<<output.size() << endl << endl;
+	cout << "Dartboards left: " << output.size() << endl;
 	if(output.size()==0){
 		cout<<"Hough Lines failed to detect any dartboards. Undoing..."<<endl;
 		output=output2;
-		cout << "Bounding boxes left: "<<output.size() << endl << endl;
+		cout << "Dartboards boxes left: "<<output.size() << endl;
 	}
+	cout << "***************************************************" << endl<<endl;
 
-  vector<Rect> dummy;
 
-// 4. Extract edges as a 1D array
+// 4. Extract edges as a 1D array for ConcentricCircles (only bounding boxes)
   vector<EdgePointInfo> edges;
-	//extractEdges(frame_gray, output, edges, 1, 30);
-	extractEdges(frame_gray, dummy, edges, 1, 30);
-	cout<<"Edge pixels found: "<<edges.size()<<endl<<endl;
+	extractEdges(frame_gray, output, edges, 1, 30, 5);
+	cout<<"Edge pixels found for circle detection: "<<edges.size()<<endl<<endl;
 
-  vector<MyEllipse> ellipses;
-	int threshold = 120, minMajor = 10, maxMajor = 200;
-  detectEllipse(edges, ellipses, threshold, minMajor, maxMajor);
-	cout<<"Ellipses found: "<<ellipses.size()<<endl;
-	for(unsigned int i=0;i<ellipses.size();i++){
-		cout<<ellipses[i].xc<<" "<<ellipses[i].yc<<" "<<ellipses[i].angle*180/pi<<" "<<ellipses[i].accum<<endl;
-		ellipse(frame, Point(ellipses[i].xc,ellipses[i].yc),Size(ellipses[i].major,ellipses[i].minor),ellipses[i].angle*180/pi,0,360,Scalar(0,255,0),2);
-	}
-return;
 // 5. Detect concentric circles
 	vector<ConcentricCircles> circs;
 	int min_radius=15,max_radius=150,thres=300,resX=6,resY=6,resR=7;
@@ -195,15 +189,51 @@ return;
 	}
 	cout << endl;
 
+	// 6. Extract edges as a 1D array for Ellipses
+	vector<Rect> dummy;
+	vector<EdgePointInfo> edgesAll;
+	extractEdges(frame_gray, dummy, edgesAll, 1, 60, 9);
+	cout<<"Edge pixels found for ellipse detection: "<<edgesAll.size()<<endl<<endl;
 
-// 6. Accumulate all centers
-  vector<Point> centers;
+  // 7. Detect ellipses
+  Mat frame_gray_copy = frame_gray.clone();
+	vector<MyEllipse> ellipses;
+	int threshold = 50, minMajor = 15, maxMajor = 200;
+  detectEllipse(edgesAll, frame_gray.size(), ellipses, threshold, minMajor, maxMajor);
+	cout<<"Ellipses found: "<<ellipses.size()<<endl;
+	for(unsigned int i=0;i<ellipses.size();i++){
+		cout<<ellipses[i].xc<<" "<<ellipses[i].yc<<" "<<ellipses[i].angle*180/pi<<" "<<ellipses[i].accum<<endl;
+		ellipse(frame_gray_copy, Point(ellipses[i].xc,ellipses[i].yc),Size(ellipses[i].major,ellipses[i].minor),ellipses[i].angle*180/pi,0,360,Scalar(0,255,0),2);
+	}
+	#ifdef DEBUG
+	namedWindow("Ellipse Detection",CV_WINDOW_AUTOSIZE);
+	imshow("Ellipse Detection", frame_gray_copy);
+	waitKey(0);
+	#endif
+
+// 8. Accumulate all centers
+  vector<Point> candidate_centers;
 	for(vector<ConcentricCircles>::iterator cir=circs.begin();cir!=circs.end();++cir){
 		Point cirC( (*cir).xc, (*cir).yc );
-		centers.push_back(cirC);
+		candidate_centers.push_back(cirC);
+	}
+	for(vector<MyEllipse>::iterator ell=ellipses.begin();ell!=ellipses.end();++ell){
+		Point ellC( (*ell).xc, (*ell).yc );
+		candidate_centers.push_back(ellC);
 	}
 
-// 7. Cluster bounding boxes based on nearby centers
+
+// 9. Merge close centers
+  vector<Point> centers;
+	while(candidate_centers.size()!=0)
+	{
+		Point cent = mergeCloseCenters(candidate_centers);
+		centers.push_back(cent);
+	}
+	cout<<"Total centers found: "<<centers.size()<<endl;
+
+
+// 10. Cluster bounding boxes based on nearby centers
   int distance_thr = 80;
 	int dart_mask[output.size()] = {0};
 	//vector<Point> minCenters
@@ -227,7 +257,7 @@ return;
 	  cout<<dart_mask[i]<<" ";
 	cout<<endl<<endl;
 
-// 8. Merge bounding boxes per cluster
+// 11. Merge bounding boxes per cluster
   vector<Rect> finalOut;
   for(size_t j=0;j<centers.size();j++){
 		double tlX=0;
@@ -270,34 +300,35 @@ return;
 
 }
 
+Point mergeCloseCenters(vector<Point>& candidate_centers)
+{
+	Point c(*candidate_centers.begin());
+	candidate_centers.erase(candidate_centers.begin());
+	int dist_thresh = 80;
+	vector<Point>::iterator it = candidate_centers.begin();
+	Point avg(c);
+	int counter = 1;
+	while(it!=candidate_centers.end())
+	{
+		double dist = norm(c-*(it));
+		if(dist<dist_thresh)
+		{
+			avg += (*it);
+			counter++;
+			it = candidate_centers.erase(it);
+		}
+		else{
+			++it;
+		}
+	}
+	avg = avg/counter;
+	return avg;
+}
+
 void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 {
 	Mat src_gray = frame_gray.clone();
 	Mat edges;
-
-// 	/// Detector parameters
-//  int blockSize = 2;
-//  int apertureSize = 3;
-//  double k = 0.04;
-// Mat dst,dst_norm,dst_norm_scaled;
-//  /// Detecting corners
-//  cornerHarris( src_gray, dst, blockSize, apertureSize, k, BORDER_DEFAULT );
-//  /// Normalizing
-// normalize( dst, dst_norm, 0, 255, NORM_MINMAX, CV_32FC1, Mat() );
-// convertScaleAbs( dst_norm, dst_norm_scaled );
-//  /// Drawing a circle around corners
-// for( int j = 0; j < dst_norm.rows ; j++ )
-// 	 { for( int i = 0; i < dst_norm.cols; i++ )
-// 				{
-// 					if( (int) dst_norm.at<float>(j,i) > 150 )
-// 						{
-// 						 circle( dst_norm_scaled, Point( i, j ), 5,  Scalar(0), 2, 8, 0 );
-// 						}
-// 				}
-// 	 }
-//
-//  imshow("harris edges",dst_norm_scaled);
-//  waitKey(0);
 
   //blur( src_gray, src_gray, Size(9,9) );
 	GaussianBlur( src_gray, src_gray, Size(9,9), 0, 0, BORDER_DEFAULT );
@@ -350,7 +381,7 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 
 double rectIntersection(Rect A, Rect B){
 	Rect C =  A & B;
-	return C.area() / (A.area()+B.area()-C.area());
+	return (float)C.area() / (float)(A.area()+B.area()-C.area());
 }
 
 void drawRects(Mat& frame, Mat& output, vector<Rect> v)
@@ -403,12 +434,13 @@ bool valid(int num, int min, int max){
   return true;
 }
 
-void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor)
+void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor)
 {
 	double eps = 0.0001;
-	int rotationSpan = 90;
-	float minAspectRatio = 0.1;
+	//int rotationSpan = 90;
+	float minAspectRatio = 0.25;
 	size_t edgeNum = edgeList.size();
+	int min_distance = max(imsize.height,imsize.width)/5;
 
 	cout<<"Possible major axes: "<<edgeNum*edgeNum<<endl;
 
@@ -441,7 +473,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, in
 
   //ANGULAR CONSTRAINT HERE IF NEEDED
 
-  int randomise = 2;
+  int randomise = 8; //<--------------------------------------------------------------FUCKING RANDOMISE
 	int* perm = new int[npairs]; //allocate memory
 
 	#pragma omp parallel for
@@ -465,10 +497,9 @@ void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, in
 		int x0 = (x1+x2)/2, y0=(y1+y2)/2;
 		float a_sq = distsSq[perm[i]]/4.0f;
 
-		vector<int> accum;
-		accum.resize(maxMajor,0);
-
-		int bestMinor = 0;
+		Mat accum = Mat::zeros(1,&maxMajor,CV_16U);
+		//vector<int> accum;
+		//accum.resize(maxMajor,0);
 
 		#pragma omp parallel
 		{
@@ -497,84 +528,54 @@ void detectEllipse(vector<EdgePointInfo> edgeList, vector<MyEllipse>& output, in
 		}
 		#pragma omp critical
 		{
+			short int* acc_ptr = accum.ptr<short int>();
 			for(int n=0;n<maxMajor;n++){
-				accum[n] += local_accum[n];
+				acc_ptr[n] += local_accum[n];
 			}
 		}
 	  }
-		//TODO: ADD GAUSSIAN BLUR
-		//GaussianBlur( accum, accum, Size(1,5), 0, 0, BORDER_DEFAULT );
-		int* element = max_element(&accum[ceil(sqrt(a_sq)*minAspectRatio)],&accum[maxMajor]);
-		bestMinor = distance(&accum[0], element);
-		if(*element>threshold)
-			output.push_back(MyEllipse(x0, y0, atan2(y1-y2,x1-x2), sqrt(a_sq), bestMinor, *element));
-		fill(accum.begin(), accum.end(), 0);
+		GaussianBlur( accum, accum, Size(1,5), 1, 0, BORDER_DEFAULT );
+		short int* acc_ptr = accum.ptr<short int>();
+		short int max = 0;
+		short int maxIndex = 0;
+		for(int l=maxMajor-1;l>=ceil(sqrt(a_sq)*minAspectRatio);l--){
+			//cout<<max<<endl;
+			if(acc_ptr[l]>max){
+				max = acc_ptr[l];
+				maxIndex = l;
+			}
+			acc_ptr[l] = 0;
+		}
+		if(max>threshold){
+			MyEllipse candidate(x0, y0, atan2(y1-y2,x1-x2), sqrt(a_sq), maxIndex, max);
+			vector<MyEllipse>::iterator it = output.begin();
+			bool confirmed = true;
+			while(it!=output.end())
+			{
+				if(min_distance*min_distance  > ((*it).xc-candidate.xc)*((*it).xc-candidate.xc)+((*it).yc-candidate.yc)*((*it).yc-candidate.yc) )
+				{
+					if((*it).accum > candidate.accum){
+						confirmed = false;
+						++it;
+					}
+					else{
+						it = output.erase(it);
+					}
+				}
+				else
+				{
+					++it;
+				}
+			}
+			if(confirmed){
+				output.push_back(candidate);
+			}
+		}
 	}
 
 	delete(perm); //free memory
 
 }
-
-// void detectEllipse(vector<EdgePointInfo> edgeList, vector<Ellipse>& output, int threshold, int minMajor, int maxMajor, int minMinor, int maxMinor)
-// {
-// 	int accum[maxMinor] = {0};
-// 	for(unsigned int i=0;i<edgeList.size();i++)
-// 	{
-// 		cout<<i<<endl;
-// 		Point p1(edgeList[i].x, edgeList[i].y);
-// 		for(unsigned int j=i+1;j<edgeList.size();j++)
-// 		{
-// 			Point p2(edgeList[j].x, edgeList[j].y);
-// 			double dist = norm(p1-p2);
-// 			if(dist>=minMajor && dist<=maxMajor)
-// 			{
-// 				Point p0( (p1+p2)/2 );
-// 				double a = dist/2;
-// 				double angle = atan2(p2.y-p1.y, p2.x-p1.x);
-// 				if(angle>pi/2 || angle<-pi/2) continue;
-// 				for(unsigned int k=0;k<edgeList.size();k++)
-// 				{
-// 					//cout<<k<<endl;
-// 					if(k==i||k==j) continue;
-// 					Point p(edgeList[k].x, edgeList[k].y);
-// 					double d = norm(p-p0);
-// 					if(d>minMinor && d < a)
-// 					{
-// 						double f = norm(p-p2);
-// 						double costau = (a*a+d*d-f*f)/(2*a*d);
-// 						if(costau<0) continue;
-// 						double sintau_sq = 1-costau*costau;
-// 						//cout<<"f: "<<f<<" a: "<<a<<" d: "<<d<<" sintau_sq: "<<sintau_sq<<" costau: "<<costau<<endl;
-// 						unsigned int b = round( sqrt( (a*a*d*d*sintau_sq)/(a*a-d*d*costau*costau) ) );
-// 						//cout<<b<<endl;
-// 						accum[b]++;
-// 					}
-// 				}
-// 				int index = 0;
-// 				int max = 0;
-// 				for(int k=0;k<a;k++)
-// 				{
-// 					if(accum[k]>max){
-// 						max = accum[k];
-// 						index = k;
-// 					}
-// 					accum[k] = 0;
-// 				}
-// 				if(max>threshold)
-// 				{
-// 					Ellipse el;
-// 					el.xc = p0.x;
-// 					el.yc = p0.y;
-// 					el.angle = angle;
-// 					el.major = dist;
-// 					el.minor = 2*index;
-// 					cout<<el.xc<<" "<<el.yc<<" "<<el.angle<<" "<<el.major<<" "<<el.minor<<endl;
-// 					output.push_back(el);
-// 				}
-// 			}
-// 		}
-// 	}
-// }
 
 void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radius, int max_radius,
 											int threshold, int resX, int resY, int resR, vector<ConcentricCircles>& output)
@@ -684,37 +685,39 @@ void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radiu
 			}
 		}
 	}
-	//imshow("test",accum);
-	//waitKey(0);
-	//Mat hspace2D;
-	//hspace2D.create(original_thr.size(),original_thr.type());
+	show3Dhough(accum);
 }
 
 void show3Dhough(Mat& input){
 
 	if(input.dims!=3){
-		cout<<"Insufficient dimensions of input image: < 3 dimensions"<<endl;
+		cout<<"Only 3 dimensional matrices are accepted!"<<endl;
 		return;
 	}
 
-	int dimX = input.size[0];
-	int dimY = input.size[1];
+	int dimX = input.size[1];
+	int dimY = input.size[0];
 	int dimZ = input.size[2];
-	int sizes[2] = {dimX,dimY};
+	int sizes[2] = {dimY,dimX};
 
-	Mat output = Mat::zeros(2,sizes,CV_16U);
+	Mat output;
+	output.create(2,sizes,CV_8U);
 
-	for(int x=0; x<dimX; x++){
-		for(int y=0; y<dimY; y++){
+	for(int y=0; y<dimY; y++){
+		for(int x=0; x<dimX; x++){
+			int total = 0;
 			for(int z=0; z<dimZ; z++){
-				output.at<uchar>(x,y) += input.at<short int>(x,y,z);
+				 total += input.at<short int>(y,x,z);
 			}
+			output.at<uchar>(y,x) = saturate_cast<uchar>(log(total)*25);
 		}
 	}
-
+	namedWindow("Hough Space",CV_WINDOW_AUTOSIZE);
+	imshow("Hough Space", output);
+	waitKey(0);
 }
 
-void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh)
+void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh, int kernel_size)
 {
   float magScale = 255.f/1442.f;
 	int scale = 1;
@@ -726,7 +729,7 @@ void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeLi
 	thres.create(src.size(),src.type());
 	grad.create(src.size(),src.type());
 
-	GaussianBlur( src, src, Size(5,5), 0, 0, BORDER_DEFAULT );
+	GaussianBlur( src, src, Size(kernel_size,kernel_size), 0, 0, BORDER_DEFAULT );
 
 	Sobel( src, dx, CV_16S, 1, 0, 3, scale, delta, BORDER_DEFAULT );
 	Sobel( src, dy, CV_16S, 0, 1, 3, scale, delta, BORDER_DEFAULT );
