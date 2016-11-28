@@ -209,16 +209,18 @@ return;
 	//vector<Point> minCenters
 	for(unsigned int i = 0; i<output.size();++i){
 		dart_mask[i] = -1;
+		float minDist = 9999999;
+		int minDistIndex = 0;
 		for(unsigned int j=0;j<centers.size();j++){
 			Point rectC( output[i].x+output[i].width/2, output[i].y+output[i].height/2 );
 			Point circC( centers[j] );
 			double dist = norm(rectC-circC);
-			//int minDim = min(output[i].width, output[i].height);
-			if(dist<distance_thr){
-				dart_mask[i] = j;
-				break;
+			if(dist<minDist){
+				minDist = dist;
+				minDistIndex = j;
 			}
 		}
+		if(minDist<distance_thr) dart_mask[i] = minDistIndex;
 	}
 	cout<<"Clustering:  ";
 	for(unsigned int i=0;i<output.size();i++)
