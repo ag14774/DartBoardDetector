@@ -247,7 +247,7 @@ void detect( Mat& frame, vector<Rect>& output )
 	}
 	cout << "**************************************************" << endl<<endl;
 
-// 6. Extract edges as a 1D array for Ellipses
+// 8. Extract edges as a 1D array for Ellipses
 	cout << "*********Preparing for ellipse detection**********" << endl;
 	vector<EdgePointInfo> edgesEllipses;
 	extractEdges(frame_gray, output, edgesEllipses, 1, 30, 7);
@@ -276,15 +276,11 @@ void detect( Mat& frame, vector<Rect>& output )
 
 // 8. Accumulate all centers
   cout << "***********Accumulating all centers found**********" <<endl;
-	for(vector<ConcentricCircles>::iterator cir=circs.begin();cir!=circs.end();++cir){
-		Point cirC( (*cir).xc, (*cir).yc );
-		candidate_centers.push_back(cirC);
-	}
 	for(vector<MyEllipse>::iterator ell=ellipses.begin();ell!=ellipses.end();++ell){
 		Point ellC( (*ell).xc, (*ell).yc );
 		candidate_centers.push_back(ellC);
 	}
-	cout << "Found " << candidate_centers.size() << " possible dartboard centers"<< endl;
+	cout << "Found " << candidate_centers.size() << " additional possible dartboard centers"<< endl;
 	cout << "***************************************************" <<endl<<endl;
 
 
