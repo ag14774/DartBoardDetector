@@ -172,7 +172,7 @@ void detect( Mat& frame, vector<Rect>& output )
 // 4. Detect concentric circles
   cout << "**********Detecting concentric circles************" <<endl;
 	vector<ConcentricCircles> circs;
-	int min_radius=15,max_radius=150,thres=500,resX=6,resY=6,resR=7;
+	int min_radius=15,max_radius=150,thres=400,resX=6,resY=6,resR=7;
 	detectConcentric(edges, frame_gray.size(), min_radius, max_radius, thres, resX, resY, resR, circs);
 	cout<<"Found "<< circs.size() << " concentric circles:" << endl;
 	for(vector<ConcentricCircles>::iterator it = circs.begin();it!=circs.end();++it){
@@ -237,20 +237,25 @@ void detect( Mat& frame, vector<Rect>& output )
 
 // 7. Hough lines
 	cout << "****Performing Hough transform to detect lines****" << endl;
-  vector<Rect> output2 = output;
+  //vector<Rect> output2 = output;
   HoughLinesFilter(frame_gray, output);
 	cout << "Bounding boxes left: " << output.size() << endl;
-	if(output.size()==0){
-		cout<<"Hough Lines failed to detect any dartboards. Undoing..."<<endl;
-		output=output2;
-		cout << "Bounding boxes left after hough lines: "<<output.size() << endl;
-	}
+	//if(output.size()==0){
+	//	cout<<"Hough Lines failed to detect any dartboards. Undoing..."<<endl;
+	//	output=output2;
+	//	cout << "Bounding boxes left after hough lines: "<<output.size() << endl;
+	//}
 	cout << "**************************************************" << endl<<endl;
+
+	if(output.size() == 0){
+		output = finalOut;
+		return;
+	}
 
 // 8. Extract edges as a 1D array for Ellipses
 	cout << "*********Preparing for ellipse detection**********" << endl;
 	vector<EdgePointInfo> edgesEllipses;
-	extractEdges(frame_gray, output, edgesEllipses, 1, 30, 7);
+	extractEdges(frame_gray, output, edgesEllipses, 1, 50, 7);
 	cout<<"Edge pixels found for ellipse detection: "<<edgesEllipses.size()<<endl;
 	cout << "**************************************************" << endl<<endl;
 
@@ -260,7 +265,7 @@ void detect( Mat& frame, vector<Rect>& output )
 	vector<MyEllipse> ellipses;
 	//int threshold = 50, minMajor = 15, maxMajor = 200;
   //detectEllipse(edgesAll, frame_gray.size(), ellipses, threshold, minMajor, maxMajor);
-  int threshold = 30, minMajor = 15, maxMajor = 200;
+  int threshold = 35, minMajor = 15, maxMajor = 200;
   detectEllipse(edgesEllipses, frame_gray.size(), ellipses, threshold, minMajor, maxMajor);
 	cout<<"Ellipses found: "<<ellipses.size()<<endl;
 	for(unsigned int i=0;i<ellipses.size();i++){
@@ -284,9 +289,23 @@ void detect( Mat& frame, vector<Rect>& output )
 	cout << "***************************************************" <<endl<<endl;
 
 
-// 9. Merge close centers
+// 9. Merge or discard close centers
   cout << "***************Merging close centers***************" << endl;
   vector<Point> centers;
+	int minDist = max(frame_gray.size().height,frame_gray.size().width)/5;
+	for(vector<Rect>::iterator boxIt = finalOut.begin();boxIt!=finalOut.end();++boxIt){
+		Point rectC((*boxIt).tl().x+(*boxIt).width/2, (*boxIt).tl().y+(*boxIt).height/2);
+		vector<Point>::iterator it = candidate_centers.begin();
+		while(it!=candidate_centers.end()){
+			double dist = norm((*it)-rectC);
+			if(dist<minDist){
+				it = candidate_centers.erase(it);
+			}
+			else{
+				++it;
+			}
+		}
+	}
 	while(candidate_centers.size()!=0)
 	{
 		Point cent = mergeCloseCenters(candidate_centers, frame_gray.size());
@@ -345,7 +364,7 @@ void detect( Mat& frame, vector<Rect>& output )
 				Point rectC( output[i].x+output[i].width/2, output[i].y+output[i].height/2 );
 				Point circC( centers[j] );
 				double dist = norm(rectC-circC);
-				double weight = 1.0/dist; //inverse proportional to distance
+				double weight = 1.0f/dist; //inverse proportional to distance
 				sumWeight += weight;
 				tlX += weight*output[i].tl().x;
 				tlY += weight*output[i].tl().y;
@@ -398,11 +417,14 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	Mat edges;
 
   //blur( src_gray, src_gray, Size(3,3) );
-  GaussianBlur( src_gray, src_gray, Size(5,5), 0, 0, BORDER_DEFAULT );
+
+	threshold(src_gray,src_gray,100,255,0);
+
+  GaussianBlur( src_gray, src_gray, Size(9,9), 0, 0, BORDER_DEFAULT );
 
 	int kernel = 3;
 	int ratio = 3;
-	int low_threshold=50;
+	int low_threshold=70;
 
 	Canny(src_gray, edges, low_threshold, low_threshold*ratio, kernel, true);
 	//dilate(edges,edges,Mat());
@@ -414,7 +436,7 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	vector<Vec4i> lines; //vector holding lines to be detected
 	//HoughLinesP(edges, lines, 3, 1*CV_PI/180, 70, 15, 10);
 	//HoughLinesP(edges, lines, 1, 2*CV_PI/180, 50, 15, 20);
-	HoughLinesP(edges, lines, 1, 2*CV_PI/180, 30, 15, 5);//15,15,5 works
+	HoughLinesP(edges, lines, 3, 1*CV_PI/180, 50, 15, 10);//15,15,5 works
 
 	vector<Point> midPoints; // vector holding line midpoints
 	Point mid; //line midpoint
@@ -541,7 +563,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 
   //ANGULAR CONSTRAINT HERE IF NEEDED
 
-  int randomise = 8;
+  int randomise = 6;
 	int* perm = new int[npairs]; //allocate memory
 
 	#pragma omp parallel for
