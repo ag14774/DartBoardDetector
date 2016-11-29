@@ -21,7 +21,7 @@
 #define MAX_CONCENTRIC 20
 #define DEBUG
 //#define GROUND_TRUTH
-//#define ONLY_VIOLA_JONES
+#define ONLY_VIOLA_JONES
 
 using namespace std;
 using namespace cv;
