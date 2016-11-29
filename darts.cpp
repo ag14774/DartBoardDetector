@@ -71,7 +71,7 @@ void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radiu
 void show3Dhough(Mat& input);
 void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor);
 void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh, int kernel_size);
-Point mergeCloseCenters(vector<Point>& candidate_centers);
+Point mergeCloseCenters(vector<Point>& candidate_centers, Size imsize);
 double rectIntersection(Rect A, Rect B);
 double fscore(vector<Rect> ground, vector<Rect> detected);
 
@@ -157,52 +157,61 @@ void detect( Mat& frame, vector<Rect>& output )
 	return;
 	#endif
 
-	// 3. Hough lines
+// 3. Extract edges as a 1D array for ConcentricCircles
+  cout << "****Preparing for concentric circle detection*****" << endl;
+	vector<Rect> dummy;
+  vector<EdgePointInfo> edges;
+	extractEdges(frame_gray, dummy, edges, 1, 50, 5);
+	cout<<"Edge pixels found for circle detection: "<<edges.size()<<endl;
+	cout << "**************************************************" << endl<<endl;
+
+
+// 4. Detect concentric circles
+  cout << "**********Detecting concentric circles************" <<endl;
+	vector<ConcentricCircles> circs;
+	int min_radius=15,max_radius=150,thres=500,resX=6,resY=6,resR=7;
+	detectConcentric(edges, frame_gray.size(), min_radius, max_radius, thres, resX, resY, resR, circs);
+	cout<<"Found "<< circs.size() << " concentric circles:" << endl;
+	for(vector<ConcentricCircles>::iterator it = circs.begin();it!=circs.end();++it){
+		cout << "("<<(*it).xc <<", "<<(*it).yc<<"): ";
+		for(int i=0;i<(*it).num;i++){
+			cout << (*it).rs[i] << " ";
+		}
+		cout << " Score: "<<(*it).total_acc<<endl;
+	}
+	cout << "**************************************************" << endl<<endl;
+
+
+// 5. Hough lines
 	cout << "****Performing Hough transform to detect lines****" << endl;
   vector<Rect> output2 = output;
-  HoughLinesFilter(frame_gray, output);
+  HoughLinesFilter(frame_gray_norm, output);
 	cout << "Dartboards left: " << output.size() << endl;
 	if(output.size()==0){
 		cout<<"Hough Lines failed to detect any dartboards. Undoing..."<<endl;
 		output=output2;
 		cout << "Dartboards boxes left: "<<output.size() << endl;
 	}
-	cout << "***************************************************" << endl<<endl;
+	cout << "**************************************************" << endl<<endl;
 
+// 6. Extract edges as a 1D array for Ellipses
+	cout << "*********Preparing for ellipse detection**********" << endl;
+	vector<EdgePointInfo> edgesEllipses;
+	extractEdges(frame_gray_norm, output, edgesEllipses, 1, 30, 7);
+	cout<<"Edge pixels found for ellipse detection: "<<edgesEllipses.size()<<endl;
+	cout << "**************************************************" << endl<<endl;
 
-// 4. Extract edges as a 1D array for ConcentricCircles (only bounding boxes)
-  vector<EdgePointInfo> edges;
-	extractEdges(frame_gray, output, edges, 1, 30, 5);
-	cout<<"Edge pixels found for circle detection: "<<edges.size()<<endl<<endl;
-
-// 5. Detect concentric circles
-	vector<ConcentricCircles> circs;
-	int min_radius=15,max_radius=150,thres=300,resX=6,resY=6,resR=7;
-	detectConcentric(edges, frame_gray.size(), min_radius, max_radius, thres, resX, resY, resR, circs);
-	cout<<endl<<"Found "<< circs.size() << " concentric circles:" << endl;
-	for(vector<ConcentricCircles>::iterator it = circs.begin();it!=circs.end();++it){
-		cout << "("<<(*it).xc <<", "<<(*it).yc<<"): ";
-		for(int i=0;i<(*it).num;i++){
-			cout << (*it).rs[i] << " ";
-		}
-		cout << endl;
-	}
-	cout << endl;
-
-	// 6. Extract edges as a 1D array for Ellipses
-	vector<Rect> dummy;
-	vector<EdgePointInfo> edgesAll;
-	extractEdges(frame_gray, dummy, edgesAll, 1, 60, 9);
-	cout<<"Edge pixels found for ellipse detection: "<<edgesAll.size()<<endl<<endl;
-
-  // 7. Detect ellipses
+// 7. Detect ellipses
+  cout << "**Detecting ellipses. This might take a while...**" <<endl;
   Mat frame_gray_copy = frame_gray.clone();
 	vector<MyEllipse> ellipses;
-	int threshold = 50, minMajor = 15, maxMajor = 200;
-  detectEllipse(edgesAll, frame_gray.size(), ellipses, threshold, minMajor, maxMajor);
+	//int threshold = 50, minMajor = 15, maxMajor = 200;
+  //detectEllipse(edgesAll, frame_gray.size(), ellipses, threshold, minMajor, maxMajor);
+  int threshold = 30, minMajor = 5, maxMajor = 200;
+  detectEllipse(edgesEllipses, frame_gray.size(), ellipses, threshold, minMajor, maxMajor);
 	cout<<"Ellipses found: "<<ellipses.size()<<endl;
 	for(unsigned int i=0;i<ellipses.size();i++){
-		cout<<ellipses[i].xc<<" "<<ellipses[i].yc<<" "<<ellipses[i].angle*180/pi<<" "<<ellipses[i].accum<<endl;
+		cout<<"("<<ellipses[i].xc<<", "<<ellipses[i].yc<<"): angle("<<ellipses[i].angle*180/pi<<") major("<<ellipses[i].major<<") minor("<<ellipses[i].minor<<") Score: "<<ellipses[i].accum<<endl;
 		ellipse(frame_gray_copy, Point(ellipses[i].xc,ellipses[i].yc),Size(ellipses[i].major,ellipses[i].minor),ellipses[i].angle*180/pi,0,360,Scalar(0,255,0),2);
 	}
 	#ifdef DEBUG
@@ -210,8 +219,10 @@ void detect( Mat& frame, vector<Rect>& output )
 	imshow("Ellipse Detection", frame_gray_copy);
 	waitKey(0);
 	#endif
+	cout << "***************************************************" <<endl<<endl;
 
 // 8. Accumulate all centers
+  cout << "***********Accumulating all centers found**********" <<endl;
   vector<Point> candidate_centers;
 	for(vector<ConcentricCircles>::iterator cir=circs.begin();cir!=circs.end();++cir){
 		Point cirC( (*cir).xc, (*cir).yc );
@@ -221,19 +232,27 @@ void detect( Mat& frame, vector<Rect>& output )
 		Point ellC( (*ell).xc, (*ell).yc );
 		candidate_centers.push_back(ellC);
 	}
+	cout << "Found " << candidate_centers.size() << " possible dartboard centers"<< endl;
+	cout << "***************************************************" <<endl<<endl;
 
 
 // 9. Merge close centers
+  cout << "***************Merging close centers***************" << endl;
   vector<Point> centers;
 	while(candidate_centers.size()!=0)
 	{
-		Point cent = mergeCloseCenters(candidate_centers);
+		Point cent = mergeCloseCenters(candidate_centers, frame_gray.size());
 		centers.push_back(cent);
 	}
-	cout<<"Total centers found: "<<centers.size()<<endl;
+	cout<<"Final centers found after merging: "<<centers.size()<<endl;
+	for(size_t i=0;i<centers.size();i++){
+		cout<<i<<". "<<centers[i]<<endl;
+	}
+	cout << "***************************************************" <<endl<<endl;
 
 
 // 10. Cluster bounding boxes based on nearby centers
+  cout << "*Classifying bounding boxes based on found centers*" << endl;
   int distance_thr = 80;
 	int dart_mask[output.size()] = {0};
 	//vector<Point> minCenters
@@ -252,12 +271,18 @@ void detect( Mat& frame, vector<Rect>& output )
 		}
 		if(minDist<distance_thr) dart_mask[i] = minDistIndex;
 	}
-	cout<<"Clustering:  ";
-	for(unsigned int i=0;i<output.size();i++)
+	int boxes_left = 0;
+	cout<<"Class per bounding box:  ";
+	for(size_t i=0;i<output.size();i++){
 	  cout<<dart_mask[i]<<" ";
-	cout<<endl<<endl;
+		if (dart_mask[i] >= 0) boxes_left++;
+	}
+	cout<<endl;
+	cout<<"Bounding boxes left after classification: "<<boxes_left<<endl;
+	cout << "***************************************************" <<endl<<endl;
 
 // 11. Merge bounding boxes per cluster
+  cout << "************Merging close bounding boxes***********" <<endl;
   vector<Rect> finalOut;
   for(size_t j=0;j<centers.size();j++){
 		double tlX=0;
@@ -288,23 +313,17 @@ void detect( Mat& frame, vector<Rect>& output )
 			finalOut.push_back(box);
 	  }
 	}
-
-  /*for(int i=0;i<output.size();i++){
-		if(dart_mask[i]>=0){
-			Rect r(output[i]);
-			finalOut.push_back(r);
-		}
-	}*/
-
 	output = finalOut;
+	cout << "Bounding boxes left after merging: "<<output.size()<<endl;
+	cout << "***************************************************" << endl<<endl;
 
 }
 
-Point mergeCloseCenters(vector<Point>& candidate_centers)
+Point mergeCloseCenters(vector<Point>& candidate_centers, Size imsize)
 {
 	Point c(*candidate_centers.begin());
 	candidate_centers.erase(candidate_centers.begin());
-	int dist_thresh = 80;
+	int dist_thresh = max(imsize.height,imsize.width)/5;
 	vector<Point>::iterator it = candidate_centers.begin();
 	Point avg(c);
 	int counter = 1;
@@ -330,14 +349,15 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	Mat src_gray = frame_gray.clone();
 	Mat edges;
 
-  //blur( src_gray, src_gray, Size(9,9) );
-	GaussianBlur( src_gray, src_gray, Size(9,9), 0, 0, BORDER_DEFAULT );
+  //blur( src_gray, src_gray, Size(3,3) );
+  GaussianBlur( src_gray, src_gray, Size(3,3), 0, 0, BORDER_DEFAULT );
 
 	int kernel = 3;
 	int ratio = 3;
-	int low_threshold=60;
+	int low_threshold=50;
 
 	Canny(src_gray, edges, low_threshold, low_threshold*ratio, kernel, true);
+	//dilate(edges,edges,Mat());
 	#ifdef DEBUG
 	imshow("Hough Edges",edges);
 	waitKey(0);
@@ -346,7 +366,7 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	vector<Vec4i> lines; //vector holding lines to be detected
 	//HoughLinesP(edges, lines, 3, 1*CV_PI/180, 70, 15, 10);
 	//HoughLinesP(edges, lines, 1, 2*CV_PI/180, 50, 15, 20);
-	HoughLinesP(edges, lines, 1, 2*CV_PI/180, 15, 15, 5);//15,15,5 works
+	HoughLinesP(edges, lines, 2, 3*CV_PI/180, 80, 15, 10);//15,15,5 works
 
 	vector<Point> midPoints; // vector holding line midpoints
 	Point mid; //line midpoint
@@ -364,15 +384,15 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	#endif
 
 	// double midThreshold = 0.002;
-	double midThreshold = 0.001;//0.0015
+	double midThreshold = 0.002;//0.0015
 	vector<Rect>::iterator it = output.begin();
-	cout<<"****Calculating line scores****"<<endl;
+	cout<<"Lines found: "<<midPoints.size()<<". Calculating scores: "<<endl;
 	while(it!=output.end()){
 		int midScore = 0;
 		for(size_t j=0; j<midPoints.size(); j++){
 			if((*it).contains(midPoints[j])) midScore++;
 		}
-		double required = midThreshold * (*it).area();
+		double required = max(5.0, midThreshold * (*it).area());
 		cout<<(*it)<<"  \tScore: "<<midScore<<". Required: "<<(int)required<<endl;
 		if(midScore<(int)required) it=output.erase(it);
 		else ++it;
@@ -438,7 +458,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 {
 	double eps = 0.0001;
 	//int rotationSpan = 90;
-	float minAspectRatio = 0.25;
+	float minAspectRatio = 0.4;
 	size_t edgeNum = edgeList.size();
 	int min_distance = max(imsize.height,imsize.width)/5;
 
@@ -473,7 +493,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 
   //ANGULAR CONSTRAINT HERE IF NEEDED
 
-  int randomise = 8; //<--------------------------------------------------------------FUCKING RANDOMISE
+  int randomise = 4;
 	int* perm = new int[npairs]; //allocate memory
 
 	#pragma omp parallel for
@@ -685,7 +705,28 @@ void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radiu
 			}
 		}
 	}
+	// double mean = 0;
+	// double std_deviation = 0;
+	// for(size_t i=0;i<output.size();i++)
+	// 	mean+= output[i].total_acc;
+	// mean = mean / output.size();
+	// for(size_t i=0;i<output.size();i++)
+	// 	std_deviation += (output[i].total_acc-mean)*(output[i].total_acc-mean);
+  // std_deviation = std_deviation / (output.size()-1);
+	// double limit = mean - 1*std_deviation;
+	// vector<ConcentricCircles>::iterator it = output.begin();
+	// while(it!=output.end())
+	// {
+	// 	if((*it).total_acc<limit){
+	// 		it = output.erase(it);
+	// 	}
+	// 	else{
+	// 		++it;
+	// 	}
+	// }
+	#ifdef DEBUG
 	show3Dhough(accum);
+	#endif
 }
 
 void show3Dhough(Mat& input){
