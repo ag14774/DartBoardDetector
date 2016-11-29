@@ -22,6 +22,7 @@
 #define DEBUG
 //#define GROUND_TRUTH
 //#define ONLY_VIOLA_JONES
+//#define ONLY_CONCENTRIC_CIRCLES
 
 using namespace std;
 using namespace cv;
@@ -141,6 +142,7 @@ void detect( Mat& frame, vector<Rect>& output )
 	Mat frame_blur,frame_dst;
 	Mat frame_gray2;
 	vector<Rect> finalOut;
+	vector<Point> candidate_centers;
 
 
 	// 1. Prepare Image by turning it into Grayscale
@@ -184,31 +186,71 @@ void detect( Mat& frame, vector<Rect>& output )
 
 
 // 5. Create bounding boxes from circles
-//  for(vector<ConcentricCircles>::iterator it = circs.begin();it!=circs.end();++it){
-//		Point offset((*it).rs[(*it).num-1],(*it).rs[(*it).num-1]);
-//		Point center((*it).xc,(*it).yc);
-//		Rect box(center-offset,center+offset);
-//		finalOut.push_back(box);
-//	}
+  cout << "*******Creating bounding boxes using circles******" <<endl;
+	int confidence_thresh = 1000;
+  for(vector<ConcentricCircles>::iterator it = circs.begin();it!=circs.end();++it){
+		Point offset((*it).rs[(*it).num-1],(*it).rs[(*it).num-1]);
+		Point center((*it).xc,(*it).yc);
+		Rect box(center-offset,center+offset);
+		if((*it).total_acc>confidence_thresh)
+			finalOut.push_back(box);
+		else
+			candidate_centers.push_back(center);
+	}
+	cout << "Circles classified as dartboards: " << finalOut.size()<<endl;
+	cout << "Circle centers submitted for further analysis: " << candidate_centers.size() << endl;
+	cout << "**************************************************"<<endl<<endl;
 
-// 6.
+	#ifdef ONLY_CONCENTRIC_CIRCLES
+	output=finalOut;
+	return;
+	#endif
 
-// 5. Hough lines
+
+// 6. Remove related Viola-Jones boxes
+  cout << "*********Removing nearby Viola-Jones boxes********"<<endl;
+	int dist_thresh = 80;
+	int counter = 0;
+	for(vector<Rect>::iterator it=finalOut.begin();it!=finalOut.end();++it){
+		Rect accepted_box = *it;
+		Point accepted_boxC(accepted_box.tl().x+accepted_box.width/2,accepted_box.tl().y+accepted_box.height/2);
+		vector<Rect>::iterator violaBox = output.begin();
+		while(violaBox!=output.end()){
+			Rect box = *violaBox;
+			Point boxC(box.tl().x+box.width/2,box.tl().y+box.height/2);
+			float dist = norm(accepted_boxC-boxC);
+			double interArea = (box & accepted_box).area();
+			if(interArea>0 || dist<dist_thresh){
+				violaBox = output.erase(violaBox);
+				counter++;
+			}
+			else{
+				++violaBox;
+			}
+		}
+	}
+	cout << "Comparing circle boxes with Viola-Jones boxes..."<<endl;
+	cout << "Viola-Jones boxes removed: " << counter <<endl;
+	cout << "Viola-Jones boxes left: " << output.size() << endl;
+	cout << "**************************************************" <<endl<<endl;
+
+
+// 7. Hough lines
 	cout << "****Performing Hough transform to detect lines****" << endl;
   vector<Rect> output2 = output;
-  HoughLinesFilter(frame_gray_norm, output);
-	cout << "Dartboards left: " << output.size() << endl;
+  HoughLinesFilter(frame_gray, output);
+	cout << "Bounding boxes left: " << output.size() << endl;
 	if(output.size()==0){
 		cout<<"Hough Lines failed to detect any dartboards. Undoing..."<<endl;
 		output=output2;
-		cout << "Dartboards boxes left: "<<output.size() << endl;
+		cout << "Bounding boxes left after hough lines: "<<output.size() << endl;
 	}
 	cout << "**************************************************" << endl<<endl;
 
 // 6. Extract edges as a 1D array for Ellipses
 	cout << "*********Preparing for ellipse detection**********" << endl;
 	vector<EdgePointInfo> edgesEllipses;
-	extractEdges(frame_gray_norm, output, edgesEllipses, 1, 30, 7);
+	extractEdges(frame_gray, output, edgesEllipses, 1, 30, 7);
 	cout<<"Edge pixels found for ellipse detection: "<<edgesEllipses.size()<<endl;
 	cout << "**************************************************" << endl<<endl;
 
@@ -218,7 +260,7 @@ void detect( Mat& frame, vector<Rect>& output )
 	vector<MyEllipse> ellipses;
 	//int threshold = 50, minMajor = 15, maxMajor = 200;
   //detectEllipse(edgesAll, frame_gray.size(), ellipses, threshold, minMajor, maxMajor);
-  int threshold = 30, minMajor = 5, maxMajor = 200;
+  int threshold = 30, minMajor = 15, maxMajor = 200;
   detectEllipse(edgesEllipses, frame_gray.size(), ellipses, threshold, minMajor, maxMajor);
 	cout<<"Ellipses found: "<<ellipses.size()<<endl;
 	for(unsigned int i=0;i<ellipses.size();i++){
@@ -234,7 +276,6 @@ void detect( Mat& frame, vector<Rect>& output )
 
 // 8. Accumulate all centers
   cout << "***********Accumulating all centers found**********" <<endl;
-  vector<Point> candidate_centers;
 	for(vector<ConcentricCircles>::iterator cir=circs.begin();cir!=circs.end();++cir){
 		Point cirC( (*cir).xc, (*cir).yc );
 		candidate_centers.push_back(cirC);
@@ -361,7 +402,7 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	Mat edges;
 
   //blur( src_gray, src_gray, Size(3,3) );
-  GaussianBlur( src_gray, src_gray, Size(3,3), 0, 0, BORDER_DEFAULT );
+  GaussianBlur( src_gray, src_gray, Size(5,5), 0, 0, BORDER_DEFAULT );
 
 	int kernel = 3;
 	int ratio = 3;
@@ -377,7 +418,7 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	vector<Vec4i> lines; //vector holding lines to be detected
 	//HoughLinesP(edges, lines, 3, 1*CV_PI/180, 70, 15, 10);
 	//HoughLinesP(edges, lines, 1, 2*CV_PI/180, 50, 15, 20);
-	HoughLinesP(edges, lines, 2, 3*CV_PI/180, 80, 15, 10);//15,15,5 works
+	HoughLinesP(edges, lines, 1, 2*CV_PI/180, 30, 15, 5);//15,15,5 works
 
 	vector<Point> midPoints; // vector holding line midpoints
 	Point mid; //line midpoint
@@ -469,7 +510,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 {
 	double eps = 0.0001;
 	//int rotationSpan = 90;
-	float minAspectRatio = 0.4;
+	float minAspectRatio = 0.35;
 	size_t edgeNum = edgeList.size();
 	int min_distance = max(imsize.height,imsize.width)/5;
 
@@ -504,7 +545,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 
   //ANGULAR CONSTRAINT HERE IF NEEDED
 
-  int randomise = 4;
+  int randomise = 8;
 	int* perm = new int[npairs]; //allocate memory
 
 	#pragma omp parallel for
@@ -565,7 +606,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 			}
 		}
 	  }
-		GaussianBlur( accum, accum, Size(1,5), 1, 0, BORDER_DEFAULT );
+		GaussianBlur( accum, accum, Size(1,3), 1, 0, BORDER_DEFAULT );
 		short int* acc_ptr = accum.ptr<short int>();
 		short int max = 0;
 		short int maxIndex = 0;
