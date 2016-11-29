@@ -21,7 +21,7 @@
 #define MAX_CONCENTRIC 20
 #define DEBUG
 //#define GROUND_TRUTH
-#define ONLY_VIOLA_JONES
+//#define ONLY_VIOLA_JONES
 
 using namespace std;
 using namespace cv;
@@ -140,6 +140,7 @@ void detect( Mat& frame, vector<Rect>& output )
 	Mat frame_gray_norm;
 	Mat frame_blur,frame_dst;
 	Mat frame_gray2;
+	vector<Rect> finalOut;
 
 
 	// 1. Prepare Image by turning it into Grayscale
@@ -181,6 +182,16 @@ void detect( Mat& frame, vector<Rect>& output )
 	}
 	cout << "**************************************************" << endl<<endl;
 
+
+// 5. Create bounding boxes from circles
+//  for(vector<ConcentricCircles>::iterator it = circs.begin();it!=circs.end();++it){
+//		Point offset((*it).rs[(*it).num-1],(*it).rs[(*it).num-1]);
+//		Point center((*it).xc,(*it).yc);
+//		Rect box(center-offset,center+offset);
+//		finalOut.push_back(box);
+//	}
+
+// 6.
 
 // 5. Hough lines
 	cout << "****Performing Hough transform to detect lines****" << endl;
@@ -283,7 +294,7 @@ void detect( Mat& frame, vector<Rect>& output )
 
 // 11. Merge bounding boxes per cluster
   cout << "************Merging close bounding boxes***********" <<endl;
-  vector<Rect> finalOut;
+
   for(size_t j=0;j<centers.size();j++){
 		double tlX=0;
 		double tlY=0;
