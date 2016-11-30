@@ -21,7 +21,7 @@
 #include "darts_gt.h"
 
 #define MAX_CONCENTRIC 20
-//#define DEBUG
+#define DEBUG
 //#define GROUND_TRUTH
 //#define ONLY_VIOLA_JONES
 //#define ONLY_CONCENTRIC_CIRCLES
@@ -297,7 +297,7 @@ void detect( Mat& frame, vector<Rect>& output )
 
 
 // 9. Merge or discard close centers
-  cout << "***************Merging remaining centers***************" << endl;
+  cout << "*************Merging remaining centers*************" << endl;
   vector<Point> centers;
 	int minDist = max(frame_gray.size().height,frame_gray.size().width)/5;
 	for(vector<Rect>::iterator boxIt = finalOut.begin();boxIt!=finalOut.end();++boxIt){
@@ -318,7 +318,7 @@ void detect( Mat& frame, vector<Rect>& output )
 		Point cent = mergeCloseCenters(candidate_centers, frame_gray.size());
 		centers.push_back(cent);
 	}
-	cout<<"Final centers found after merging: "<<centers.size()<<endl;
+	cout<<"Centers remaining after merging: "<<centers.size()<<endl;
 	for(size_t i=0;i<centers.size();i++){
 		cout<<i<<". "<<centers[i]<<endl;
 	}
