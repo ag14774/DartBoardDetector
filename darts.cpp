@@ -6,6 +6,8 @@
 
 // header inclusion
 #include <stdio.h>
+#include <algorithm>
+#include <vector>
 //#include "opencv2/objdetect/objdetect.hpp"
 //#include "opencv2/opencv.hpp"
 //#include "opencv2/core/core.hpp"
@@ -67,11 +69,11 @@ void detect( Mat& frame, vector<Rect>& output );
 void drawRects(Mat& frame, Mat& output, vector<Rect> v);
 void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output);
                                                                            //inverse of resolution in X, Y and R direction
-void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radius, int max_radius,
+void detectConcentric(vector<EdgePointInfo>& edgeList, Size imsize, int min_radius, int max_radius,
 											int threshold, int resX, int resY, int resR, vector<ConcentricCircles>& output);
 void show3Dhough(Mat& input);
-void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor);
-void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh, int kernel_size);
+void detectEllipse(vector<EdgePointInfo>& edgeList, Size imsize, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor);
+void extractEdges(Mat& gray_input, vector<Rect>& v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh, int kernel_size);
 Point mergeCloseCenters(vector<Point>& candidate_centers, Size imsize);
 double rectIntersection(Rect A, Rect B);
 double fscore(vector<Rect> ground, vector<Rect> detected);
@@ -91,6 +93,8 @@ CascadeClassifier cascade;
 /** @function main */
 int main( int argc, const char** argv )
 {
+	srand(time(0));
+
   // 1. Read Input Image
 	Mat frame = imread(argv[1], CV_LOAD_IMAGE_COLOR);
 
@@ -159,6 +163,7 @@ void detect( Mat& frame, vector<Rect>& output )
   #ifdef ONLY_VIOLA_JONES
 	return;
 	#endif
+
 
 // 3. Extract edges as a 1D array for ConcentricCircles
   cout << "****Preparing for concentric circle detection*****" << endl;
@@ -270,7 +275,9 @@ void detect( Mat& frame, vector<Rect>& output )
 	cout<<"Ellipses found: "<<ellipses.size()<<endl;
 	for(unsigned int i=0;i<ellipses.size();i++){
 		cout<<"("<<ellipses[i].xc<<", "<<ellipses[i].yc<<"): angle("<<ellipses[i].angle*180/pi<<") major("<<ellipses[i].major<<") minor("<<ellipses[i].minor<<") Score: "<<ellipses[i].accum<<endl;
+		#ifdef DEBUG
 		ellipse(frame_gray_copy, Point(ellipses[i].xc,ellipses[i].yc),Size(ellipses[i].major,ellipses[i].minor),ellipses[i].angle*180/pi,0,360,Scalar(0,255,0),2);
+		#endif
 	}
 	#ifdef DEBUG
 	namedWindow("Ellipse Detection",CV_WINDOW_AUTOSIZE);
@@ -290,7 +297,7 @@ void detect( Mat& frame, vector<Rect>& output )
 
 
 // 9. Merge or discard close centers
-  cout << "***************Merging close centers***************" << endl;
+  cout << "***************Merging remaining centers***************" << endl;
   vector<Point> centers;
 	int minDist = max(frame_gray.size().height,frame_gray.size().width)/5;
 	for(vector<Rect>::iterator boxIt = finalOut.begin();boxIt!=finalOut.end();++boxIt){
@@ -429,6 +436,7 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	Canny(src_gray, edges, low_threshold, low_threshold*ratio, kernel, true);
 	//dilate(edges,edges,Mat());
 	#ifdef DEBUG
+	namedWindow("Hough Edges", CV_WINDOW_AUTOSIZE);
 	imshow("Hough Edges",edges);
 	waitKey(0);
 	#endif
@@ -448,7 +456,7 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 		//cout<<midPoints[i]<<endl;
 	}
 	#ifdef DEBUG
-	namedWindow("HoughLines",1);
+	namedWindow("HoughLines",CV_WINDOW_AUTOSIZE);
 	imshow("HoughLines",src_gray);
 	waitKey(0);
 	#endif
@@ -524,7 +532,7 @@ bool valid(int num, int min, int max){
   return true;
 }
 
-void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor)
+void detectEllipse(vector<EdgePointInfo>& edgeList, Size imsize, vector<MyEllipse>& output, int threshold, int minMajor, int maxMajor)
 {
 	double eps = 0.0001;
 	//int rotationSpan = 90;
@@ -547,7 +555,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 			int y2 = edgeList[j].y;
 
 			int length = (x2-x1)*(x2-x1) + (y2-y1)*(y2-y1);
-			//distsSq[j][i] = distsSq[i][j];
+
 			if(length<(maxMajor*maxMajor) && length>(minMajor*minMajor))
 			{
 
@@ -564,7 +572,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 
   //ANGULAR CONSTRAINT HERE IF NEEDED
 
-  int randomise = 6;
+  int randomise = 4;
 	int* perm = new int[npairs]; //allocate memory
 
 	#pragma omp parallel for
@@ -589,8 +597,6 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 		float a_sq = distsSq[perm[i]]/4.0f;
 
 		Mat accum = Mat::zeros(1,&maxMajor,CV_16U);
-		//vector<int> accum;
-		//accum.resize(maxMajor,0);
 
 		#pragma omp parallel
 		{
@@ -669,7 +675,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 
 }
 
-void detectConcentric(vector<EdgePointInfo> edgeList, Size imsize, int min_radius, int max_radius,
+void detectConcentric(vector<EdgePointInfo>& edgeList, Size imsize, int min_radius, int max_radius,
 											int threshold, int resX, int resY, int resR, vector<ConcentricCircles>& output)
 {
 	int min_distance = max(imsize.height,imsize.width)/5;
@@ -830,7 +836,7 @@ void show3Dhough(Mat& input){
 	waitKey(0);
 }
 
-void extractEdges(Mat& gray_input, vector<Rect> v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh, int kernel_size)
+void extractEdges(Mat& gray_input, vector<Rect>& v, vector<EdgePointInfo>& edgeList, int method, int edge_thresh, int kernel_size)
 {
   float magScale = 255.f/1442.f;
 	int scale = 1;
