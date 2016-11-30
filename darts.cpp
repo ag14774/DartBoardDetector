@@ -21,7 +21,7 @@
 #include "darts_gt.h"
 
 #define MAX_CONCENTRIC 20
-#define DEBUG
+//#define DEBUG
 //#define GROUND_TRUTH
 //#define ONLY_VIOLA_JONES
 //#define ONLY_CONCENTRIC_CIRCLES
