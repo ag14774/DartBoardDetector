@@ -44,7 +44,7 @@ typedef struct{
 }EdgePointInfo;
 
 typedef struct MyEllipse{
-	MyEllipse(int nxc, int nyc, float nangle, int nmajor, int nminor, int naccum)
+	MyEllipse(int nxc, int nyc, float nangle, int nmajor, int nminor, float naccum)
 	{
 		xc=nxc;
 		yc=nyc;
@@ -58,7 +58,7 @@ typedef struct MyEllipse{
 	float angle;
 	int major;
 	int minor;
-	int accum;
+	float accum;
 
 }MyEllipse;
 
@@ -255,7 +255,7 @@ void detect( Mat& frame, vector<Rect>& output )
 // 8. Extract edges as a 1D array for Ellipses
 	cout << "*********Preparing for ellipse detection**********" << endl;
 	vector<EdgePointInfo> edgesEllipses;
-	extractEdges(frame_gray, output, edgesEllipses, 1, 50, 7);
+	extractEdges(frame_gray, output, edgesEllipses, 1, 70, 5);
 	cout<<"Edge pixels found for ellipse detection: "<<edgesEllipses.size()<<endl;
 	cout << "**************************************************" << endl<<endl;
 
@@ -265,7 +265,7 @@ void detect( Mat& frame, vector<Rect>& output )
 	vector<MyEllipse> ellipses;
 	//int threshold = 50, minMajor = 15, maxMajor = 200;
   //detectEllipse(edgesAll, frame_gray.size(), ellipses, threshold, minMajor, maxMajor);
-  int threshold = 35, minMajor = 15, maxMajor = 200;
+  int threshold = 35, minMajor = 50, maxMajor = 200;
   detectEllipse(edgesEllipses, frame_gray.size(), ellipses, threshold, minMajor, maxMajor);
 	cout<<"Ellipses found: "<<ellipses.size()<<endl;
 	for(unsigned int i=0;i<ellipses.size();i++){
@@ -418,9 +418,9 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 
   //blur( src_gray, src_gray, Size(3,3) );
 
-	threshold(src_gray,src_gray,100,255,0);
+	//threshold(src_gray,src_gray,120,255,0);
 
-  GaussianBlur( src_gray, src_gray, Size(9,9), 0, 0, BORDER_DEFAULT );
+  GaussianBlur( src_gray, src_gray, Size(5,5), 0, 0, BORDER_DEFAULT );
 
 	int kernel = 3;
 	int ratio = 3;
@@ -436,7 +436,7 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	vector<Vec4i> lines; //vector holding lines to be detected
 	//HoughLinesP(edges, lines, 3, 1*CV_PI/180, 70, 15, 10);
 	//HoughLinesP(edges, lines, 1, 2*CV_PI/180, 50, 15, 20);
-	HoughLinesP(edges, lines, 3, 1*CV_PI/180, 50, 15, 10);//15,15,5 works
+	HoughLinesP(edges, lines, 3, 3*CV_PI/180, 65, 25, 8);//15,15,5 works
 
 	vector<Point> midPoints; // vector holding line midpoints
 	Point mid; //line midpoint
@@ -548,8 +548,9 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 
 			int length = (x2-x1)*(x2-x1) + (y2-y1)*(y2-y1);
 			//distsSq[j][i] = distsSq[i][j];
-			if(length<maxMajor*maxMajor && length>minMajor*minMajor)
+			if(length<(maxMajor*maxMajor) && length>(minMajor*minMajor))
 			{
+
 				I.push_back(i);
 				J.push_back(j);
 				distsSq.push_back(length);
@@ -624,7 +625,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 			}
 		}
 	  }
-		GaussianBlur( accum, accum, Size(1,3), 1, 0, BORDER_DEFAULT );
+		GaussianBlur( accum, accum, Size(1,5), 1, 0, BORDER_DEFAULT );
 		short int* acc_ptr = accum.ptr<short int>();
 		short int max = 0;
 		short int maxIndex = 0;
@@ -636,6 +637,7 @@ void detectEllipse(vector<EdgePointInfo> edgeList, Size imsize, vector<MyEllipse
 			}
 			acc_ptr[l] = 0;
 		}
+		//double predicted_circumference = 4*((sqrt(a_sq))+maxIndex)*pow(pi/4,4*sqrt(a_sq)*maxIndex/((sqrt(a_sq)+maxIndex)*(sqrt(a_sq)+maxIndex)));
 		if(max>threshold){
 			MyEllipse candidate(x0, y0, atan2(y1-y2,x1-x2), sqrt(a_sq), maxIndex, max);
 			vector<MyEllipse>::iterator it = output.begin();
