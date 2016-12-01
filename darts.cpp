@@ -177,7 +177,7 @@ void detect( Mat& frame, vector<Rect>& output )
 // 4. Detect concentric circles
   cout << "**********Detecting concentric circles************" <<endl;
 	vector<ConcentricCircles> circs;
-	int min_radius=15,max_radius=150,thres=400,resX=6,resY=6,resR=7;
+	int min_radius=20,max_radius=150,thres=400,resX=6,resY=6,resR=7;
 	detectConcentric(edges, frame_gray.size(), min_radius, max_radius, thres, resX, resY, resR, circs);
 	cout<<"Found "<< circs.size() << " concentric circles:" << endl;
 	for(vector<ConcentricCircles>::iterator it = circs.begin();it!=circs.end();++it){
