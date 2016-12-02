@@ -462,7 +462,7 @@ void HoughLinesFilter(const Mat& frame_gray, vector<Rect>& output)
 	#endif
 
 	// double midThreshold = 0.002;
-	double midThreshold = 0.002;//0.0015
+	double midThreshold = 0.0025;//0.0015
 	vector<Rect>::iterator it = output.begin();
 	cout<<"Lines found: "<<midPoints.size()<<". Calculating scores: "<<endl;
 	while(it!=output.end()){
