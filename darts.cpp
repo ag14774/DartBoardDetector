@@ -24,7 +24,7 @@
 //#define DEBUG
 //#define GROUND_TRUTH
 //#define ONLY_VIOLA_JONES
-//#define ONLY_CONCENTRIC_CIRCLES
+#define ONLY_CONCENTRIC_CIRCLES
 
 using namespace std;
 using namespace cv;
@@ -206,11 +206,6 @@ void detect( Mat& frame, vector<Rect>& output )
 	cout << "Circle centers submitted for further analysis: " << candidate_centers.size() << endl;
 	cout << "**************************************************"<<endl<<endl;
 
-	#ifdef ONLY_CONCENTRIC_CIRCLES
-	output=finalOut;
-	return;
-	#endif
-
 
 // 6. Remove related Viola-Jones boxes
   cout << "*********Removing nearby Viola-Jones boxes********"<<endl;
@@ -238,6 +233,9 @@ void detect( Mat& frame, vector<Rect>& output )
 	cout << "Viola-Jones boxes removed: " << counter <<endl;
 	cout << "Viola-Jones boxes left: " << output.size() << endl;
 	cout << "**************************************************" <<endl<<endl;
+
+
+  #ifndef ONLY_CONCENTRIC_CIRCLES
 
 
 // 7. Hough lines
@@ -324,6 +322,11 @@ void detect( Mat& frame, vector<Rect>& output )
 	}
 	cout << "***************************************************" <<endl<<endl;
 
+  #endif
+
+	#ifdef ONLY_CONCENTRIC_CIRCLES
+	vector<Point> centers = candidate_centers;
+	#endif
 
 // 10. Cluster bounding boxes based on nearby centers
   cout << "*Classifying bounding boxes based on found centers*" << endl;
