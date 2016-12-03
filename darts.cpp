@@ -24,7 +24,7 @@
 //#define DEBUG
 //#define GROUND_TRUTH
 //#define ONLY_VIOLA_JONES
-#define ONLY_CONCENTRIC_CIRCLES
+//#define ONLY_CONCENTRIC_CIRCLES
 
 using namespace std;
 using namespace cv;
@@ -786,25 +786,6 @@ void detectConcentric(vector<EdgePointInfo>& edgeList, Size imsize, int min_radi
 			}
 		}
 	}
-	// double mean = 0;
-	// double std_deviation = 0;
-	// for(size_t i=0;i<output.size();i++)
-	// 	mean+= output[i].total_acc;
-	// mean = mean / output.size();
-	// for(size_t i=0;i<output.size();i++)
-	// 	std_deviation += (output[i].total_acc-mean)*(output[i].total_acc-mean);
-  // std_deviation = std_deviation / (output.size()-1);
-	// double limit = mean - 1*std_deviation;
-	// vector<ConcentricCircles>::iterator it = output.begin();
-	// while(it!=output.end())
-	// {
-	// 	if((*it).total_acc<limit){
-	// 		it = output.erase(it);
-	// 	}
-	// 	else{
-	// 		++it;
-	// 	}
-	// }
 	#ifdef DEBUG
 	show3Dhough(accum);
 	#endif
